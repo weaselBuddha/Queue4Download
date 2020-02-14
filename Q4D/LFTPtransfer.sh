@@ -1,5 +1,5 @@
 #!/bin/bash
-set -xv
+#set -xv  # debugging
 
 # Please Change
 readonly USER="dummy"
