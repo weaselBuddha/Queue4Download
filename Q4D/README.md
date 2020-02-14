@@ -9,11 +9,13 @@ There are a total of four scripts, two on the server (most likely seedbox), and 
 ### Server
 
 Queue4Download.sh - RTorrent Hook Script. Throws an event upon completion of the torrent, uses the payload name, the payload hash, and a simple category code
+
 EventAck.sh - Daemon script to listen for ACK events and change the torrent label
 
 ### Client
 
 EventProcess.sh - Received Event Dispatch Daemon Script. Catches an event, queues an LFTP job to transfer the payload
+
 LFTPtransfer.sh - Transfer Engine. Using LFTP get the payload from the server to a specific directory (using the category code) on the client, and acknowledge the transfer back to the server.
 
 ## Prerequisites
