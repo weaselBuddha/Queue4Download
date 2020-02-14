@@ -57,7 +57,7 @@ function WaitLock()
 	
 function GetTorrentField()
 {
-	local _rtcFile=$(echo "$1"|sed s/,/\?/g)
+	local _rtcFile=$(echo "$1"|tr  [\]\[\,] [????])
 	local _field=$2
 	local _default=$3
 
@@ -75,7 +75,7 @@ function GetTorrentField()
 function GetTorrentHash()
 {
 	local _payload="$1"
-	local _rtcFile="$(echo ${_payload}|sed s/,/\?/g)"
+	local _rtcFile="$(echo ${_payload}|tr  [\]\[\,] [????])"
 	local _hash
 	local _tfile
 
