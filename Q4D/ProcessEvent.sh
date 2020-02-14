@@ -39,7 +39,7 @@ function Main()
         	if [[ ${#Event[@]} -eq NUM_FIELDS ]]
        		then
 			# Spawn transfer process
-               		LFTP_SCRIPT "${Event[$FILENAME]}" ${Event[$HASH]} ${Event[$TYPE]} 2>>$LOGFILE &
+               		$LFTP_SCRIPT "${Event[$FILENAME]}" ${Event[$HASH]} ${Event[$TYPE]} 2>>$LOGFILE &
         	else
                		echo $(date)": Event Malformed, " ${#Event[@]} " Elements - Discarded "  >> $LOGFILE
         	fi
