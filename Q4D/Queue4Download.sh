@@ -154,7 +154,7 @@ function MarkQueued()
 
         if [[ ${_hash} !=  "0000" && _sent==0 ]]
         then
-            ${_RTCONTROL}  hash=${_hash} --custom 1=$Q_LABEL
+            ${_RTCONTROL} -q hash=${_hash} --custom 1=$Q_LABEL
         fi
 }
 
