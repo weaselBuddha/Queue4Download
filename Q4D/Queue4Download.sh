@@ -20,12 +20,13 @@ readonly USER="dummy"
 readonly PW="dummyPW"
 
 readonly Q_LABEL="QUEUED"
+readonly NO_EVENT="0"
 
 function Main()
 {
 	local _payload="$1"
 	local _event
-	local _queued
+	local _queued="1" # Default Not Queued`	
 
 	Invoke=${SECONDS}
 
@@ -37,12 +38,15 @@ function Main()
 
 	payloadDetails[TYPE]=$(SetType "${_payload}")
 
-	_event="$(CreateEvent)"
+	if [[ ${payloadDetails[TYPE]} != $NO_EVENT ]]
+	{
+		_event="$(CreateEvent)"
 
-	_queued=$(PublishEvent "${_event}")
+		_queued=$(PublishEvent "${_event}")
 
-	MarkQueued ${_queued} 
-
+		MarkQueued ${_queued}
+	}
+	
 	LogEvent ${_queued}
 }
 
@@ -65,7 +69,7 @@ function GetTorrentField()
 
 	if [ -z ${_value} ]
 	then
-		_value=${_default}
+	     _value=${_default}
 	fi
 
 	echo ${_value}
@@ -91,7 +95,7 @@ function GetTorrentHash()
        	then    
         	_hash=$(basename ${TFILE} .torrent)
        	else
-		    _hash="0000"
+		_hash="0000"
            	echo $(date) ": ${_payload} Hash Not Found." >>${LOGFILE}
        	fi
 	fi
@@ -102,7 +106,7 @@ function GetTorrentHash()
 function SetType()
 {
 	local _payload="$1"
-	local _type="V"
+	local _type="V"  # Default Video (something other than plex indexed)
 
 	## Determine TYPE Code
 
@@ -110,15 +114,18 @@ function SetType()
 	payloadDetails[TRACKER]=$( GetTorrentField "${_payload}"  "tracker" "UNSET")
 	payloadDetails[TRAIT]=$(GetTorrentField "${_payload}" "traits" "%")
 
-	if [[ ${payloadDetails[LABEL]} == "TV" ]] 
+	if [[ ${payloadDetails[LABEL]} == "FREE_LEECH" ]]  # Don't Automatically Download
+	then
+		_type="0"
+	elif [[ ${payloadDetails[LABEL]} == "TV" ]]  # Sonarr, SickChill, Medusa - Destination app processing directory
 	then
 		_type="A"
 	elif [[ ${payloadDetails[TRACKER]} =~ (^.*landof*)  || "${_payload}" =~ (^.*)(\.[sS][0-9]*[Ee][0-9]*) ]]
 	then
-        	_type="T"
+        	_type="T"  # TV
 	elif [[ ${payloadDetails[TRAIT]} =~  (^movie*) ||  ${payloadDetails[TRACKER]} =~ (^.*popcorn*) || "${_payload}" =~ (^.*x0r*) ]]
 	then
-        	_type="M"
+        	_type="M"  # Movie
 	fi
 	
 	echo ${_type}
