@@ -39,13 +39,14 @@ function Main()
 	payloadDetails[TYPE]=$(SetType "${_payload}")
 
 	if [[ ${payloadDetails[TYPE]} != $NO_EVENT ]]
-	{
+	then
+	
 		_event="$(CreateEvent)"
 
 		_queued=$(PublishEvent "${_event}")
 
 		MarkQueued ${_queued}
-	}
+	fi
 	
 	LogEvent ${_queued}
 }
