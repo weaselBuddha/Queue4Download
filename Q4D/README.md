@@ -33,3 +33,4 @@ Scripts have been structured to make customization straight forward, adding in c
 Uses some of Bash 4.4, been tested on Ubuntu and FreeBSD. This has NOT been tested for any form of Windows or Windows emulation, or OSX. Mosquitto runs on all of them, it is Bash Daemon handling that would be an issue.
 
 Further notes: https://www.reddit.com/r/Chmuranet/comments/f3lghf/queue4download_scripts_to_handle_torrent_complete/
+https://www.reddit.com/r/sbtech/comments/nih988/queue4download_scripts_to_handle_torrent_complete/
