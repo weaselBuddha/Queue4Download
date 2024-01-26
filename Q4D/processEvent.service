@@ -1,0 +1,15 @@
+[Unit]
+# Systemd start-up for ProcessEvent daemon at home
+Description=Process Event
+After=network.target
+
+[Service]
+Type=simple
+User=1000
+ExecStartPre=/bin/bash -c "if test -e /tmp/lock ; then rm -f /tmp/lock; fi"
+ExecStart= /usr/bin/flock -xn /tmp/processEvent.lck -c $HOME/.Q4D/ProcessEvent.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
