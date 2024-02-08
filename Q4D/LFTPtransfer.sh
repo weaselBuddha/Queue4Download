@@ -1,130 +1,116 @@
 #!/bin/bash
-#set -xv  # debugging
+# vi: ts=4:sw=4:et
 
-# Please Change
-readonly USER="dummy"
-readonly PW="dummyPW"
-
-
-# LFTP Values
-readonly CREDS='dummy:dummyPW'
-readonly HOST="owner.chmuranet.net"
-readonly BASE="/home/owner/Downloads/"
-readonly THREADS=3
-readonly SEGMENTS=3
-readonly HOSTKEYFIX="set sftp:auto-confirm yes"
-
-## Event Bus (for ACK)
-readonly PUBLISHER="/usr/bin/mosquitto_pub"
-readonly BUS_HOST="testbed.chmuranet.com"
-readonly BUS_PORT=1883
-readonly CHANNEL="ACK"
-readonly OTHER_PARMS="-q 2"
-
-
-readonly LOGFILE=~/Process.log
-
-declare -A TypeCodes=\
-(
-	[A]="/NAS/POST"
-	[T]="/NAS/justDown/TV"
-	[M]="/NAS/justDown/Movies"
-	[V]="/NAS/Video"
-	[ERR]="/NAS/Other"
-)
+source ~/.Q4D/Q4Dconfig.sh
+source ~/.Q4D/Q4Ddefines.sh
+source ~/.Q4D/Q4Dclient.sh
 
 
 function Main()
 {
-	local _result
-	
-	local _target="$1"
-	local _hash=$2
-	local _where2=$3
+        local _target="$1"
+        local _hash=$2
+        local _where2=$3
 
+        WaitLock
 
-	WaitLock
+        if SetDirectory ${_where2}
+        then
+                TransferPayload "${_target}"
 
-	SetDirectory ${_where2}
-
-	_result=$(TransferPayload "${_target}")
-
-	ProcessResult ${_result} "${_target}" ${_hash}
-
+                ProcessResult $? "${_target}" ${_hash}
+        else
+                echo $(date)" Destination Bad: ${_where2}" >> $CLIENT_LOG
+        fi
 }
 
+# Bash Lock Function, Single Transfer at a time
 function WaitLock()
 {
-    # Wait
+    # Wait/Block
     exec 5>/tmp/lock
     flock 5
+    # Lock Released After Script Completes
 }
 
 function SetDirectory()
 {
-	local _destination=${TypeCodes[$1]:-${TypeCodes[ERR]}}
+        local _destination=${TypeCodes[$1]:-${TypeCodes[ERR]}}
 
-	cd ${_destination}
+        cd ${_destination}
 }
+
 
 
 function TransferPayload()
 {
-	local _target="$1"
-	local _transferred
+        local _target="$1"
+        local _transferred
 
-	umask 0
+        umask 0
 
     # Try to grab as a directory
-	lftp -u ${CREDS} sftp://${HOST}/  -e "$HOSTKEYFIX; cd $BASE ; mirror -c  --parallel=$THREADS --use-pget-n=$SEGMENTS \"${_target}\" ;quit" >>/tmp/fail$$.log 2>&1 
+        lftp -u ${CREDS} sftp://${HOST}/  -e "$HOSTKEYFIX; mirror -c  --parallel=$THREADS --use-pget-n=$SEGMENTS \"${_target}\" ;quit" >>/tmp/fail$$.log 2>&1
 
-	_transferred=$?
+        _transferred=$?
 
-	if [[ $_transferred -ne 0 ]]
-	then
-            # Now as a file
-        	lftp -u ${CREDS} sftp://${HOST}/  -e "$HOSTKEYFIX;cd ${BASE} ; pget -n $SEGMENTS \"${_target}\" ;quit" >>/tmp/fail$$.log 2>&1 
-        	_transferred=$?
-	fi
+        if [[ $_transferred -ne 0 ]]
+        then
+        # Now as a file
+        lftp -u ${CREDS} sftp://${HOST}/  -e "$HOSTKEYFIX; pget -n $THREADS \"${_target}\" ;quit" >>/tmp/fail$$.log 2>&1
+        _transferred=$?
+        fi
 
-	echo ${_transferred}
+        chmod -R 777 $(basename "${_target}")
+
+        return ${_transferred}
+}
+
+
+function PublishEvent()
+{
+    local _channel=$1
+    local _event="$2"
+
+    $PUBLISHER -h $BUS_HOST  -p $BUS_PORT -t ${_channel} -u $USER -P $PW -m "${_event}" -q 2
+
+    echo $?
 }
 
 function ProcessResult()
 {
-	local _result=$1
-	local _target="$2"
-	local _hash=$3
-    local _event
-	
+        local _result=$1
+        local _target="$2"
+        local _hash=$3
+        local _event
 
-	if [[ ${_result} -eq 0  ]]
-	then
-        # ACK
-       	echo $(date)": Transfer of ${_target} Completed." >> $LOGFILE
-
-        _event=$(printf "%s +\n" ${_hash})
-    else
-        # NACK
-        echo $(date)": Transfer of ${_target} Failed." >> $LOGFILE
-     	cat /tmp/fail$$.log >> $LOGFILE
-        
-        _event=$(printf "%s #\n" ${_hash})
-    
-    fi
-
-    if [ ${_hash} != "0000" ]
+    if [[ $LABELLING -eq 0  && ${_hash} != "NotUsed" ]]
     then
-        $PUBLISHER -h $BUS_HOST  -p $BUS_PORT -t $CHANNEL -u $USER -P $PW -m "${_event}" $OTHER_PARMS
+        if [[ ${_result} == 0 ]]
+        then
+            _label=$ACK
+                echo $(date)": Transfer of ${_target} Completed." >> $CLIENT_LOG
+        else
+                echo $(date)": Transfer of ${_target} Failed." >> $CLIENT_LOG
+            _label=$NACK
+                cat /tmp/fail$$.log >> $CLIENT_LOG
+        fi
 
-   	    if [[ $? -eq 0 ]]
-   	    then
-            echo $(date)": Event ACKED for "${_hash} >> $LOGFILE
-   	    else
-        	echo $(date)": ACK Failed for "${_hash} >> $LOGFILE
-   		fi
+        _event=$(printf "%s\t%s\n" ${_hash} ${_label}  )
+
+        PublishEvent ${LABEL_CHANNEL} "${_event}"
+
+                if [[ $? ]]
+                then
+                        _pub="Succeeded"
+                else
+                        _pub="Failed"
+                fi
+
+                echo $(date)": Publish of Label Event for ${_target} Set to ${_label} ${_pub}" >> $CLIENT_LOG
     fi
+
 }
 
-Main "$1" $2 $3
 
+Main "$1" $2 $3
