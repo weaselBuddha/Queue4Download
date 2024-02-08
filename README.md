@@ -4,19 +4,27 @@ Set of Scripts to automate push notification of completed torrent payloads for i
 
 ## Scripts
 
-There are a total of four scripts, two on the server (most likely seedbox), and two on the plex box (at home?)
+There are a total of four scripts, and four config files, two on the server (most likely seedbox) and Q4Dconfig.sh (both client and server configuration must be changed to work) 
+
+
 
 ### Server
 
 Queue4Download.sh - RTorrent Hook Script. Throws an event upon completion of the torrent, uses the payload name, the payload hash, and a simple category code
 
-EventAck.sh - Daemon script to listen for ACK events and change the torrent label
+LabelD.sh - Daemon script to listen for Label events and change the torrent label
+
+Types.config - Flat file declarations for type code assignment
+
+Q4Dconfig.sh - MQTT co-ords, torrent client, and labelling definitions (needed on both client and server)
 
 ### Client
 
-EventProcess.sh - Received Event Dispatch Daemon Script. Catches an event, queues an LFTP job to transfer the payload
+ProcessEvent.sh - Received Event Dispatch Daemon Script. Catches an event, queues an LFTP job to transfer the payload, runs as a daemon
 
 LFTPtransfer.sh - Transfer Engine. Using LFTP get the payload from the server to a specific directory (using the category code) on the client, and acknowledge the transfer back to the server.
+
+Q4Dclient.sh - Definitions for LFTP to access your server, and type code to directory mappings
 
 ## Prerequisites
 
