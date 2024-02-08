@@ -1,179 +1,224 @@
 #!/bin/bash
+# vi: ts=4:sw=4:et
 
+source ~/.Q4D/Q4Dconfig.sh
+source $Q4D_PATH/Q4Ddefines.sh
+
+numArgs=$#
 
 declare -A payloadDetails
 
-readonly _RTCONTROL=~/bin/rtcontrol
+case $TORRENT_CLIENT in
 
-readonly ACTIVE_TORRENT_FOLDER=~/.session
-readonly LOGFILE=~/Queue.log
+    "RTORRENT")
+        payloadDetails[KEY]=$1
+        payloadDetails[HASH]=$2
+        payloadDetails[LABEL]=$3
+        _rtcFile="$(echo $1|tr  [\]\[\,] [????])"
+        payloadDetails[TRACKER]=$(strings $ACTIVE_TORRENT_FOLDER/$2.torrent |grep "d8:announce" |cut -d: -f4
+        payloadDetails[PATH]=$5
+        ;;
 
-## Event Bus
-readonly PUBLISHER="/usr/bin/mosquitto_pub"
-readonly BUS_HOST="testbed.chmuranet.com"
-readonly BUS_PORT=1883
-readonly CHANNEL="Down"
-readonly OTHER_PARMS="-q 2"
+    "OTHER")
+        payloadDetails[KEY]=$1
+        payloadDetails[HASH]=$2
+        payloadDetails[LABEL]=$3
+        payloadDetails[TRACKER]=$4
+        payloadDetails[PATH]=$5
+        ;;
 
-# Please Change
-readonly USER="dummy"
-readonly PW="dummyPW"
+    "RTCONTROL")
+        payloadDetails[KEY]=$1
+        _rtcFile="$(echo $1|tr  [\]\[\,] [????])"
+        payloadDetails[HASH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "hash")
+        payloadDetails[LABEL]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "custom_1")
+        payloadDetails[TRACKER]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "tracker")
+        payloadDetails[PATH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "path")
+        ;;
 
-readonly Q_LABEL="QUEUED"
-readonly NO_EVENT="0"
+    "ARIA2")
+        payloadDetails[HASH]=$1
+        payloadDetails[KEY]=$(${_ARIA2} -S ${ACTIVE_TORRENT_FOLDER}/$1.torrent |grep "^Name:"|cut -d' ' -f 2- )
+        payloadDetails[LABEL]=$2
+        payloadDetails[TRACKER]=$(${_ARIA2} -S ${ACTIVE_TORRENT_FOLDER}/$1.torrent |grep "Magnet URI"|cut -d\& -f 3-|sed "s/tr=//g")
+        payloadDetails[PATH]="$payloadDetails[KEY]"
+# If path by label
+#       payloadDetails[PATH]="$payloadDetails[LABEL]/$payloadDetails[KEY]"
+# Labels/Categories are not supported explicitedly by the torrent standard
+        ;;
+
+    "DELUGE")
+        payloadDetails[HASH]=$1
+        payloadDetails[KEY]=$2
+        payloadDetails[LABEL]=$(${_DELUGECONSOLE} "info -v"  $1 |grep "Label: "|cut -d' ' -f 2)
+        payloadDetails[TRACKER]=$(${_DELUGECONSOLE} "info -v"  $1 |grep "Tracker: "|cut -d' ' -f 2-)
+        payloadDetails[PATH]=$3
+        ;;
+
+
+    "QBITTORRENT")
+        payloadDetails[KEY]=$1
+        payloadDetails[HASH]=$2
+        payloadDetails[LABEL]=$3
+        payloadDetails[TRACKER]=$4
+        payloadDetails[PATH]=$5
+        ;;
+esac
+
 
 function Main()
 {
-	local _payload="$1"
-	local _event
-	local _queued="1" # Default Not Queued`	
 
-	Invoke=${SECONDS}
+     local _event
+     local _queued
 
-	WaitLock
+     Invoke=${SECONDS}
 
-	payloadDetails[KEY]="${_payload}"
+     WaitLock
 
-	payloadDetails[HASHVAL]=$(GetTorrentHash "${_payload}")
+    if $(CheckFields)
+    then
+        SetType
 
-	payloadDetails[TYPE]=$(SetType "${_payload}")
+        _event=$(CreateQEvent "${payloadDetails[KEY]}" ${payloadDetails[HASH]} ${payloadDetails[TYPE]})
+            _queued=$(PublishEvent "${QUEUE_CHANNEL}" "${_event}")
 
-	if [[ ${payloadDetails[TYPE]} != $NO_EVENT ]]
-	then
-	
-		_event="$(CreateEvent)"
+    else
+        _queued=false
+    fi
 
-		_queued=$(PublishEvent "${_event}")
+    MarkQueued ${_queued}
 
-		MarkQueued ${_queued}
-	fi
-	
-	LogEvent ${_queued}
+    LogEvent ${_queued}
 }
+
+function CheckFields()
+{
+    local _return=0
+
+    if [[ ${numArgs}  -gt 0 ]]
+    then
+        if [[ ! -z ${payloadDetails[PATH]} && -e "${payloadDetails[PATH]}" ]]
+        then
+            payloadDetails[KEY]="${payloadDetails[PATH]}"
+        elif [[ -e ${payloadDetails[KEY]} ]]
+        then
+            if [[ -z ${payloadDetails[HASH]} ]]
+            then
+                 payloadDetails[HASH]="NotUsed"
+            fi
+        else
+            _return=1
+        fi
+    else
+        _return=1
+    fi
+
+    return ${_return}
+}
+
 
 function WaitLock()
 {
-	# Wait 
-	exec 5>/tmp/lock
-	flock 5
-}
-
- 
-	
-function GetTorrentField()
-{
-	local _rtcFile=$(echo "$1"|tr  [\]\[\,] [????])
-	local _field=$2
-	local _default=$3
-
-	local _value=$(${_RTCONTROL}  -q name="${_rtcFile}" -o  ${_field}) 
-
-	if [ -z ${_value} ]
-	then
-	     _value=${_default}
-	fi
-
-	echo ${_value}
-}
-	
-
-function GetTorrentHash()
-{
-	local _payload="$1"
-	local _rtcFile="$(echo ${_payload}|tr  [\]\[\,] [????])"
-	local _hash
-	local _tfile
-
-
-	
-	_hash=$(${_RTCONTROL} -q name="${_rtcFile}" -o "hash")
-	
-	if [ -z ${_hash} ]
-	then
-		_tfile=$(grep -l "${_payload@Q}" ${ACTIVE_TORRENT_FOLDER}/*.torrent)
-
-       	if [[  $_tfile ]]
-       	then    
-        	_hash=$(basename ${TFILE} .torrent)
-       	else
-		_hash="0000"
-           	echo $(date) ": ${_payload} Hash Not Found." >>${LOGFILE}
-       	fi
-	fi
-
-	echo ${_hash}
+        # Wait
+        exec 5>/tmp/lock
+        flock 5
 }
 
 function SetType()
 {
-	local _payload="$1"
-	local _type="V"  # Default Video (something other than plex indexed)
+    local _type=""
 
-	## Determine TYPE Code
+    ## Determine TYPE Code
 
-	payloadDetails[LABEL]=$(GetTorrentField "${_payload}" "custom_1" "UNSET")
-	payloadDetails[TRACKER]=$( GetTorrentField "${_payload}"  "tracker" "UNSET")
-	payloadDetails[TRAIT]=$(GetTorrentField "${_payload}" "traits" "%")
+    grep -Ev '(#.*$)|(^$)' $TYPE_CODES >/tmp/scratchCodes
 
-	if [[ ${payloadDetails[LABEL]} == "FREE_LEECH" ]]  # Don't Automatically Download
-	then
-		_type="0"
-	elif [[ ${payloadDetails[LABEL]} == "TV" ]]  # Sonarr, SickChill, Medusa - Destination app processing directory
-	then
-		_type="A"
-	elif [[ ${payloadDetails[TRACKER]} =~ (^.*landof*)  || "${_payload}" =~ (^.*)(\.[sS][0-9]*[Ee][0-9]*) ]]
-	then
-        	_type="T"  # TV
-	elif [[ ${payloadDetails[TRAIT]} =~  (^movie*) ||  ${payloadDetails[TRACKER]} =~ (^.*popcorn*) || "${_payload}" =~ (^.*x0r*) ]]
-	then
-        	_type="M"  # Movie
-	fi
-	
-	echo ${_type}
+    while read -r field comptype value code assigned
+    do
+        case $comptype in
+            "IS")
+                if [[ ${payloadDetails[$field]} == $value && ${_type}==$assigned ]]
+                then
+                    _type=$code
+                fi
+            ;;
 
+            "CONTAINS")
+                if [[ ${payloadDetails[$field]} =~ (^.*"$value"*)  && ${_type}==$assigned ]]
+                then
+                    _type=$code
+                fi
+            ;;
+
+            "NOT")
+                if [[ ${payloadDetails[$field]} != $value && ${_type}==$assigned ]]
+                then
+                    _type=$code
+                fi
+            ;;
+        esac
+    done </tmp/scratchCodes
+
+    if [[ ${_type} == "" ]]
+    then
+        _type=$DEFAULT_TYPE
+    fi
+
+    payloadDetails[TYPE]=${_type}
 }
 
-function CreateEvent()
+
+function CreateQEvent()
 {
-	printf "%s\t%s\t%s\n" "${payloadDetails[KEY]}" ${payloadDetails[HASHVAL]} ${payloadDetails[TYPE]}
+        printf "%s\t%s\t%s\n" "${payloadDetails[PATH]}" ${payloadDetails[HASH]} ${payloadDetails[TYPE]}
 }
 
 
 function LogEvent()
 {
-	local _result
-	local _elapsed=$(( ${SECONDS}-${Invoke} ))
+        local _result
+        local _elapsed=$(( ${SECONDS}-${Invoke} ))
 
-	if [[ $1==0 ]]
-	then 
-		_result="SUCCESS"
-	else
-		_result="FAIL"
-	fi
-	_type=${payloadDetails[TYPE]}
-	
-	printf "%s: <%s> %s ( %s ) ( %s ) [%d secs]\n" "$(date)" ${_result} "${payloadDetails[KEY]}" "${payloadDetails[HASHVAL]}" ${payloadDetails[TYPE]}  ${_elapsed} >> ${LOGFILE}
+        if [[ $1==0 ]]
+        then
+                _result="SUCCESS"
+        else
+                _result="FAIL"
+        fi
+
+        printf "%s: <%s> %s ( %s ) ( %s ) [%d secs]\n" "$(date)" ${_result} "${payloadDetails[KEY]}" "${payloadDetails[HASH]}" ${payloadDetails[TYPE]}  ${_elapsed} >> $SERVER_LOGFILE
 }
 
 function MarkQueued()
 {
-	local _sent=$1
-	local _hash=${payloadDetails[HASHVAL]}
+        local _sent=$1
+        local _hash=${payloadDetails[HASH]}
 
-        if [[ ${_hash} !=  "0000" && _sent==0 ]]
+    if [[ ${_hash} !=  "NotUsed"  || $LABELLING -eq 0 ]]
+    then
+        if [[ ${_sent} ]]
         then
-            ${_RTCONTROL} -q hash=${_hash} --custom 1=$Q_LABEL
+            _label=$Q_LABEL
+        else
+            _label=$Q_FAILED
         fi
+
+        _event=$(printf "%s\t%s\n" ${_hash} ${_label}  )
+
+        PublishEvent ${LABEL_CHANNEL} "${_event}"
+    fi
+
 }
 
 
 function PublishEvent()
 {
-	local _event="$1"
+    local _channel=$1
+        local _event="$2"
 
-	$PUBLISHER -h $BUS_HOST  -p $BUS_PORT -t $CHANNEL -u $USER -P $PW -m "${_event}" $OTHER_PARMS
-	
-	echo $?
+        $PUBLISHER -h $BUS_HOST  -p $BUS_PORT -t ${_channel} -u $USER -P $PW -m "${_event}" -q 2
+
+        echo $?
 }
 
-Main "$1"
+Main
