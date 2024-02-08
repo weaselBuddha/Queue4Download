@@ -34,7 +34,6 @@ readonly ACTIVE_TORRENT_FOLDER=~/.session
 # [ARIA2] Use Aria2 for Torrent Metadata
 # ~/.Q4D/Queue4Download.sh [HASH] [LABEL]
 
-
 # [DELUGE] DelugeD Torrent Client, uses deluge-console, presumes local daemon
 # Use Execute Plugin
 # ~/.Q4D/Queue4Download.sh [HASH] [NAME] [PATH]  <Execute plugin provides, by default, the three parameters>
