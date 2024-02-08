@@ -1,65 +1,46 @@
 #!/bin/bash
+# vi: ts=4:sw=4:et
+exec 2>&1 >>~/Events.log
 
 declare -a Event
 
-# Constants
-
-readonly BUS_PATH="/usr/bin/mosquitto_sub"
-readonly NUM_FIELDS=3
-
-readonly FILENAME=0
-readonly HASH=1
-readonly TYPE=2
-
-# Configuration
-readonly LFTP_SCRIPT=/home/owner/Scripts/LFTPtransfer.sh
-readonly SERVER="owner.chmuranet.net"
-
-# MQTT
-readonly QSERVER="testbed.chmuranet.com"
-readonly QPORT=1883
-readonly QUSER="dummy"
-readonly QPW='dummyPW'
-readonly CHANNEL="Down"
-
-#logging
-readonly LOGFILE="/home/owner/Process.log"
-exec >> $LOGFILE 
-
-
-
+source ~/.Q4D/Q4Dconfig.sh
+source ~/.Q4D/Q4Ddefines.sh
+source ~/.Q4D/Q4Dclient.sh
 
 function Main()
 {
-	while GetEvent
-	do
-        	echo $(date)": Event received for "${Event[$FILENAME]}" "${Event[$HASH]} "/ " ${Event[$TYPE]} >> $LOGFILE
+        while GetEvent
+        do
+        echo $(date)": Event received for "${Event[$FILENAME]}" "${Event[$HASH]} "/ " ${Event[$TYPE]} >> $CLIENT_LOG
 
 
-        	if [[ ${#Event[@]} -eq NUM_FIELDS ]]
-       		then
-			# Spawn transfer process
-               		$LFTP_SCRIPT "${Event[$FILENAME]}" ${Event[$HASH]} ${Event[$TYPE]} 2>>$LOGFILE &
-        	else
-               		echo $(date)": Event Malformed, " ${#Event[@]} " Elements - Discarded "  >> $LOGFILE
-        	fi
-	done
+        if [[ ${#Event[@]} -eq NUM_FIELDS ]]
+        then
+                # Spawn transfer process
+                $LFTP_SCRIPT "${Event[$FILENAME]}" ${Event[$HASH]} ${Event[$TYPE]} 2>>$CLIENT_LOG &
+        else
+            echo $(date)": Event Malformed, " ${#Event[@]} " Elements - Discarded "  >> $CLIENT_LOG
+        fi
+        done
 }
 
 GetEvent()
 {
-        oldIFS=$IFS
-        IFS=$'\t'
+    oldIFS=$IFS
+    IFS=$'\t'
 
-	    # Blocks, Waiting
-        Event=($($BUS_PATH -h "$QSERVER" -C 1  -p $QPORT  -t "$CHANNEL" -u $QUSER -P "$QPW"  -q 2 -c -i 2)) 2>> $LOGFILE
-        local _result=$?
+    # Blocks, Waiting
+    Event=($($SUBSCRIBER -h $BUS_HOST -p $BUS_PORT  -t $QUEUE_CHANNEL -u $USER -P $PW  -C 1  ))
+    local _result=$?
 
-        IFS=$oldIFS
+    IFS=$oldIFS
+        echo ${Event[@]}
 
-        return $_result
+    return $_result
 }
 
 
 Main
-echo FAIL
+
+echo $0 FAILED >> $CLIENT_LOG
