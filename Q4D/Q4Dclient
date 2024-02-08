@@ -7,7 +7,7 @@
 readonly THREADS=5
 readonly SEGMENTS=4
 
-# LFTP Values (use .netrc or set up ssh keys instead)
+# LFTP Login (Home->Seedbox) Values (alternatively use .netrc or set up ssh keys instead)
 readonly CREDS='fear:loathing'
 
 # Your Server
