@@ -28,9 +28,13 @@ Q4Dclient.sh - Definitions for LFTP to access your server, and type code to dire
 
 ## Prerequisites
 
+The ability to make simple edits to shell scripts, a seedbox/server that has bash/ssh access. 
+
+Server scripts use Bash 4.0 features. Client is compatible with BSD, Linux, and other Unix variants.
+
 Uses Mosquitto MQTT simple event broker: mosquitto daemon is the broker, mosquitto_pub publishes an event, mosquitto_sub catches an event (publish and subscribe)
 
-Uses pyrocore command suite, specifically rtcontrol, to retrieve details about the torrent like the Hash, and to set the label to indicated Queued and Transferred.
+Labelling, not part of the torrent standard, is accomplished by specific client extensions, such as rtcontrol from pyroscope, and deluge-console from deluge.
 
 Uses LFTP for quick transfers
 
@@ -40,5 +44,10 @@ Scripts have been structured to make customization straight forward, adding in c
 
 Uses some of Bash 4.4, been tested on Ubuntu and FreeBSD. This has NOT been tested for any form of Windows or Windows emulation, or OSX. Mosquitto runs on all of them, it is Bash Daemon handling that would be an issue.
 
-Further notes: https://www.reddit.com/r/Chmuranet/comments/f3lghf/queue4download_scripts_to_handle_torrent_complete/
+Further notes, install instructions:
+
+https://www.reddit.com/r/sbtech/comments/1ams0hn/q4d_updated/
+
+
+Older: https://www.reddit.com/r/Chmuranet/comments/f3lghf/queue4download_scripts_to_handle_torrent_complete/
 https://www.reddit.com/r/sbtech/comments/nih988/queue4download_scripts_to_handle_torrent_complete/
