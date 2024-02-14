@@ -1,5 +1,5 @@
 #!/bin/bash
-# vi: ts=4:sw=4:et
+#vi: ts=4:sw=4:et
 
 source ~/.Q4D/Q4Dconfig.sh
 source $Q4D_PATH/Q4Ddefines.sh
@@ -11,34 +11,34 @@ declare -A payloadDetails
 case $TORRENT_CLIENT in
 
     "RTORRENT")
-        payloadDetails[KEY]=$1
+        payloadDetails[KEY]="$1"
         payloadDetails[HASH]=$2
         payloadDetails[LABEL]=$3
-        _rtcFile="$(echo $1|tr  [\]\[\,] [????])"
+        _rtcFile="$(echo $1|tr  [\]\[\,\'\"] [????])"
         payloadDetails[TRACKER]=$(strings $ACTIVE_TORRENT_FOLDER/$2.torrent |grep "d8:announce" |cut -d: -f4
-        payloadDetails[PATH]=$5
+        payloadDetails[PATH]="$5"
         ;;
 
     "OTHER")
-        payloadDetails[KEY]=$1
+        payloadDetails[KEY]="$1"
         payloadDetails[HASH]=$2
         payloadDetails[LABEL]=$3
         payloadDetails[TRACKER]=$4
-        payloadDetails[PATH]=$5
+        payloadDetails[PATH]="$5"
         ;;
 
     "RTCONTROL")
-        payloadDetails[KEY]=$1
-        _rtcFile="$(echo $1|tr  [\]\[\,] [????])"
+        payloadDetails[KEY]="$1"
+        _rtcFile="$(echo "$1"|tr  [\]\[\,\'\"] [????])"
         payloadDetails[HASH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "hash")
         payloadDetails[LABEL]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "custom_1")
         payloadDetails[TRACKER]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "tracker")
-        payloadDetails[PATH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "path")
+        payloadDetails[PATH]="$(${_RTCONTROL} -q name="${_rtcFile}" -o path)"
         ;;
 
     "ARIA2")
         payloadDetails[HASH]=$1
-        payloadDetails[KEY]=$(${_ARIA2} -S ${ACTIVE_TORRENT_FOLDER}/$1.torrent |grep "^Name:"|cut -d' ' -f 2- )
+        payloadDetails[KEY]="$(${_ARIA2} -S ${ACTIVE_TORRENT_FOLDER}/$1.torrent |grep "^Name:"|cut -d' ' -f 2- )"
         payloadDetails[LABEL]=$2
         payloadDetails[TRACKER]=$(${_ARIA2} -S ${ACTIVE_TORRENT_FOLDER}/$1.torrent |grep "Magnet URI"|cut -d\& -f 3-|sed "s/tr=//g")
         payloadDetails[PATH]="$payloadDetails[KEY]"
@@ -49,19 +49,19 @@ case $TORRENT_CLIENT in
 
     "DELUGE")
         payloadDetails[HASH]=$1
-        payloadDetails[KEY]=$2
+        payloadDetails[KEY]="$2"
         payloadDetails[LABEL]=$(${_DELUGECONSOLE} "info -v"  $1 |grep "Label: "|cut -d' ' -f 2)
         payloadDetails[TRACKER]=$(${_DELUGECONSOLE} "info -v"  $1 |grep "Tracker: "|cut -d' ' -f 2-)
-        payloadDetails[PATH]=$3
+        payloadDetails[PATH]="$3"
         ;;
 
 
     "QBITTORRENT")
-        payloadDetails[KEY]=$1
+        payloadDetails[KEY]="$1"
         payloadDetails[HASH]=$2
         payloadDetails[LABEL]=$3
         payloadDetails[TRACKER]=$4
-        payloadDetails[PATH]=$5
+        payloadDetails[PATH]="$5"
         ;;
 esac
 
@@ -69,19 +69,21 @@ esac
 function Main()
 {
 
-     local _event
-     local _queued
+    local _event
+    local _queued
 
-     Invoke=${SECONDS}
+    Invoke=${SECONDS}
 
-     WaitLock
+    WaitLock
 
-    if $(CheckFields)
+    CheckFields
+
+    if [[ $? == 0 ]]
     then
         SetType
 
         _event=$(CreateQEvent "${payloadDetails[KEY]}" ${payloadDetails[HASH]} ${payloadDetails[TYPE]})
-            _queued=$(PublishEvent "${QUEUE_CHANNEL}" "${_event}")
+        _queued=$(PublishEvent "${QUEUE_CHANNEL}" "${_event}")
 
     else
         _queued=false
@@ -98,10 +100,10 @@ function CheckFields()
 
     if [[ ${numArgs}  -gt 0 ]]
     then
-        if [[ ! -z ${payloadDetails[PATH]} && -e "${payloadDetails[PATH]}" ]]
+        if [[ ! -z "${payloadDetails[PATH]}" && -e "${payloadDetails[PATH]}" ]]
         then
             payloadDetails[KEY]="${payloadDetails[PATH]}"
-        elif [[ -e ${payloadDetails[KEY]} ]]
+        elif [[ -e "${payloadDetails[KEY]}" ]]
         then
             if [[ -z ${payloadDetails[HASH]} ]]
             then
@@ -137,21 +139,21 @@ function SetType()
     do
         case $comptype in
             "IS")
-                if [[ ${payloadDetails[$field]} == $value && ${_type}==$assigned ]]
+                if [[ "${payloadDetails[$field]}" == $value && ${_type}==$assigned ]]
                 then
                     _type=$code
                 fi
             ;;
 
             "CONTAINS")
-                if [[ ${payloadDetails[$field]} =~ (^.*"$value"*)  && ${_type}==$assigned ]]
+                if [[ "${payloadDetails[$field]}" =~ (^.*"$value"*)  && ${_type}==$assigned ]]
                 then
                     _type=$code
                 fi
             ;;
 
             "NOT")
-                if [[ ${payloadDetails[$field]} != $value && ${_type}==$assigned ]]
+                if [[ "${payloadDetails[$field]}" != $value && ${_type}==$assigned ]]
                 then
                     _type=$code
                 fi
