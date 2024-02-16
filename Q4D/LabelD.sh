@@ -1,8 +1,6 @@
 #!/bin/bash
 # vi: ts=4:sw=4:et
 
-# Server Side: Process Label Events 
-
 source ~/.Q4D/Q4Dconfig.sh
 source ~/.Q4D/Q4Ddefines.sh
 
@@ -14,9 +12,9 @@ function Main()
 
     while GetEvent
     do
-
-        _ack_field=$(eval $_LABEL_TOOL)
-        printf "%s: Transfer <%s> %s ( %s )\n" "$(date)" ${_ack_field} "${Event[LABEL_INDEX]}" ${Event[HASH_INDEX]}  >> ${SERVER_LOGFILE}
+        eval $_LABEL_TOOL >> ${SERVER_LOGFILE}
+        _ack_field=$?
+        printf "%s: Transfer <%s> %s ( %s )\n" "$(date)" "${_ack_field}" "${Event[LABEL_INDEX]}" ${Event[HASH_INDEX]}  >> ${SERVER_LOGFILE}
     done
 }
 
@@ -36,4 +34,3 @@ function GetEvent()
 }
 
 Main
-
