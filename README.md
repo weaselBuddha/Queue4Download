@@ -1,6 +1,6 @@
 # Queue4Download
 
-Set of Scripts written by Chmura to automate push notification of completed torrent payloads for integration into a home media library.
+Set of Scripts written by Chmura to automate push notification of completed torrent payloads for integration into a home media library while updating the torrent client on a remote server.
 
 
 # Why Q4D?
@@ -17,22 +17,28 @@ There are a total of four scripts, and four config files, two on the server (mos
 
 ### Server
 
-Queue4Download.sh - Torrent client hook Script. Throws an event upon completion of the torrent, uses the payload name, the payload hash, and a simple category code
+Queue4Download.sh - Torrent client hook Script. Throws an event upon completion of the torrent, event contains the payload name/path (where LFTP will find the payload), the payload hash (for label updates once the transfer is complete), and a simple category code (tells home where to put the payload, ie /Media/Movies)
 
 LabelD.sh - Daemon script to listen for Label events and change the torrent label
 
-Types.config - Flat file declarations for type code assignment
+Types.config - Flat file declarations for type code assignment (space separated lines: FIELD CONDITIONAL VALUE TYPE SCOPE)
 
 Q4Dconfig.sh - MQTT co-ords, torrent client, and labelling definitions (needed on both client and server)
 
 
 ### Client
 
-ProcessEvent.sh - Receive Queue Event Script. Catches the event, queues an LFTP job to transfer the payload, runs as a daemon. Blocks waiting for a Queue event.
+ProcessEvent.sh - Receive Queue Event Script. Catches the event, queues an LFTP job to transfer the payload, runs as a daemon. Blocks waiting for a Queue event, forks LFTP workers, which block on a lock (hence Queued4Download.sh)
 
-LFTPtransfer.sh - Transfer Engine. Using LFTP get the payload from the server to a specific directory (using the category code) into your home library, and acknowledge the transfer back to the server.
+LFTPtransfer.sh - Transfer Engine. Using LFTP, get the payload from the server to a specific directory (using the category code) into your home library, and acknowledge the transfer back to the server. 
 
 Q4Dclient.sh - Definitions for LFTP to access your server, and type code to directory mappings
+
+### Other
+
+Q4Ddefines.sh - Paths and other clutter that is largely static
+
+mosq_bin.tar.z - Largely static compile of Mosquitto (Ubuntu 20+, Debian 11)
 
 
 ## Prerequisites
@@ -45,7 +51,7 @@ Uses Mosquitto MQTT simple event broker: mosquitto daemon is the broker, mosquit
 
 Labelling, not part of the torrent standard, is accomplished by specific client extensions, such as rtcontrol from pyroscope, and deluge-console from deluge.
 
-Uses LFTP for quick transfers
+Uses LFTP for quick transfers (throttle set on Q4Dclient.sh)
 
 
 ## Notes
