@@ -43,6 +43,12 @@ readonly ACTIVE_TORRENT_FOLDER=~/.session
 # Run external program on torrent completion setting  ~/.Q4D/Queue4Download.sh "%N" %I %L %T "%F"
 # /home/user/.Q4D/Queue4Download.sh [NAME] [HASH] [LABEL] [TRACKER] [PATH]
 
+# [TRANSMISSION] Transmission UNTESTED
+# Change transmission's transmission-daemon/settings.json file:
+# "script-torrent-done-enabled": true, 
+# "script-torrent-done-filename": "/home/YOU/.Q4D/Queue4Download.sh",
+
+
 # Do we update the label after Queued?  Regular Success: QUEUED -> DONE  (Failed: NOT_QD / NOPE )
 # Requires Labelling Tool, right now only RTCONTROL and DELUGE supported by default
 
