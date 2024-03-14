@@ -63,6 +63,14 @@ case $TORRENT_CLIENT in
         payloadDetails[TRACKER]=$4
         payloadDetails[PATH]="$5"
         ;;
+        
+    "TRANSMISSION")
+        payloadDetails[KEY]="$TR_TORRENT_NAME"
+        payloadDetails[HASH]=$TR_TORRENT_HASH
+        payloadDetails[LABEL]="$TR_TORRENT_LABELS"
+        payloadDetails[TRACKER]="$TR_TORRENT_TRACKERS"
+        payloadDetails[PATH]="$TR_TORRENT_DIR"
+        ;;
 esac
 
 
