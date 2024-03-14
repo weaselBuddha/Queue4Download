@@ -55,7 +55,6 @@ case $TORRENT_CLIENT in
         payloadDetails[PATH]="$3"
         ;;
 
-
     "QBITTORRENT")
         payloadDetails[KEY]="$1"
         payloadDetails[HASH]=$2
@@ -63,6 +62,8 @@ case $TORRENT_CLIENT in
         payloadDetails[TRACKER]=$4
         payloadDetails[PATH]="$5"
         ;;
+
+# Transmission, *UNTESTED*
         
     "TRANSMISSION")
         payloadDetails[KEY]="$TR_TORRENT_NAME"
