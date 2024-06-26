@@ -61,7 +61,10 @@ function TransferPayload()
         _transferred=$?
         fi
 
-        chmod -R 777 $(basename "${_target}")
+        base=$(basename "${_target}")
+        echo base: "$base" . target: "${_target}"  >> $CLIENT_LOG
+        chmod -R 777 "$base"
+
 
         return ${_transferred}
 }
