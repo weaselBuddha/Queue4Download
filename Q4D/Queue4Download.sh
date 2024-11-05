@@ -98,7 +98,10 @@ function Main()
         _queued=false
     fi
 
-    MarkQueued ${_queued}
+    if ${LABELLING}
+    then
+        MarkQueued ${_queued}
+    fi
 
     LogEvent ${_queued}
 }
@@ -205,7 +208,7 @@ function MarkQueued()
         local _sent=$1
         local _hash=${payloadDetails[HASH]}
 
-    if [[ ${_hash} !=  "NotUsed"  || $LABELLING -eq 0 ]]
+    if [[ ${_hash} !=  "NotUsed"  ]]
     then
         if [[ ${_sent} ]]
         then
