@@ -87,8 +87,6 @@ function ProcessResult()
         local _hash=$3
         local _event
 
-    if [[ $LABELLING -eq 0  && ${_hash} != "NotUsed" ]]
-    then
         if [[ ${_result} == 0 ]]
         then
             _label=$ACK
@@ -99,19 +97,21 @@ function ProcessResult()
                 cat /tmp/fail$$.log >> $CLIENT_LOG
         fi
 
-        _event=$(printf "%s\t%s\n" ${_hash} ${_label}  )
+        if [[ $LABELLING  && ${_hash} != "NotUsed" ]]
+        then
+           _event=$(printf "%s\t%s\n" ${_hash} ${_label}  )
 
-        PublishEvent ${LABEL_CHANNEL} "${_event}"
+           PublishEvent ${LABEL_CHANNEL} "${_event}"
 
-                if [[ $? ]]
-                then
-                        _pub="Succeeded"
-                else
-                        _pub="Failed"
-                fi
+           if [[ $? ]]
+           then
+                _pub="Succeeded"
+           else
+                _pub="Failed"
+           fi
 
                 echo $(date)": Publish of Label Event for ${_target} Set to ${_label} ${_pub}" >> $CLIENT_LOG
-    fi
+        fi
 
 }
 
