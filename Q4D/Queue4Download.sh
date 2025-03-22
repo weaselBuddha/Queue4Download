@@ -16,7 +16,7 @@ case $TORRENT_CLIENT in
         payloadDetails[LABEL]=$3
         _rtcFile="$(echo $1|tr  [\]\[\,\'\"] [????])"
         payloadDetails[TRACKER]=$(strings $ACTIVE_TORRENT_FOLDER/$2.torrent |grep "d8:announce" |cut -d: -f4)
-        payloadDetails[PATH]="$5"
+        payloadDetails[PATH]="$4"
         ;;
 
     "OTHER")
