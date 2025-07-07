@@ -64,6 +64,7 @@ Further notes, install instructions:
 
 https://www.reddit.com/r/sbtech/comments/1ams0hn/q4d_updated/
 
+Python3 for pyrocore: https://github.com/kannibalox/pyrosimple
 
 Older: https://www.reddit.com/r/Chmuranet/comments/f3lghf/queue4download_scripts_to_handle_torrent_complete/
 https://www.reddit.com/r/sbtech/comments/nih988/queue4download_scripts_to_handle_torrent_complete/
