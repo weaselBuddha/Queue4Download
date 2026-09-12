@@ -29,11 +29,15 @@ case $TORRENT_CLIENT in
 
     "RTCONTROL")
         payloadDetails[KEY]="$1"
-        _rtcFile="$(echo "$1"|tr  [\]\[\,\'\"] [????])"
-        payloadDetails[HASH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "hash")
-        payloadDetails[LABEL]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "custom_1")
-        payloadDetails[TRACKER]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "tracker")
-        payloadDetails[PATH]="$(${_RTCONTROL} -q name="${_rtcFile}" -o path)"
+        # rtcontrol must receive the quotes itself, i.e. name="..." . Shell quotes
+        # are consumed before rtcontrol sees them, leaving a multi-word value
+        # unparseable, so the lookup silently matches nothing and the torrent is
+        # never queued. Glob metacharacters are mapped to ? so they match literally.
+        _rtcFile="$(printf '%s' "$1" | sed 's/[][*?]/?/g')"
+        payloadDetails[HASH]=$(${_RTCONTROL} -q "name=\"${_rtcFile}\"" -o "hash")
+        payloadDetails[LABEL]=$(${_RTCONTROL} -q "name=\"${_rtcFile}\"" -o "custom_1")
+        payloadDetails[TRACKER]=$(${_RTCONTROL} -q "name=\"${_rtcFile}\"" -o "tracker")
+        payloadDetails[PATH]="$(${_RTCONTROL} -q "name=\"${_rtcFile}\"" -o path)"
         ;;
 
     "ARIA2")
