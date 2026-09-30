@@ -1,0 +1,29 @@
+# TorrentTool.rtorrent - bare rTorrent (no pyroscope/rtcontrol)
+#
+# Hook (.rtorrent.rc) - four arguments:
+#   method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.name),(d.hash),(d.custom1),(d.data_path)"
+#
+# GetPayloadDetails args: $1 = name, $2 = hash, $3 = label, $4 = path
+#   (fills the payload record via payload_set)
+# Labelling: none available with bare rTorrent
+#            (use TorrentTool.rtcontrol if you have pyroscope)
+
+function GetPayloadDetails()
+{
+    payload_set KEY "$1"
+    payload_set HASH "$2"
+    payload_set LABEL "$3"
+    # announce URL out of the .torrent file: the bencoded announce value is
+    # length-prefixed, so cut out exactly that many chars - keeps scheme and
+    # port (v2 fix, bug B11: v1's cut -f4 dropped the port; -f4- dropped the
+    # scheme and ran on into the next bencoded field)
+    payload_set TRACKER "$(strings "$HOME/.session/$2.torrent" \
+        | awk 'match($0, /d8:announce[0-9]+:/) { print substr($0, RSTART + RLENGTH, substr($0, RSTART + 11, RLENGTH - 12) + 0); exit }')"
+    payload_set PATH "$4"
+}
+
+function SetLabel()
+{
+    echo "no labelling tool (TorrentTool.rtorrent) - label '$2' ignored"
+    return 0
+}

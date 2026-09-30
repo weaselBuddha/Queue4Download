@@ -1,0 +1,20 @@
+[Unit]
+# Systemd start-up for the central log daemon (LogD.sh, bus mode) at home.
+# The same unit can be installed on the seedbox too, for a central log
+# there as well. In flat mode (LOG_MODE) the daemon is not needed.
+Description=Q4D central log daemon
+After=network-online.target
+Wants=network-online.target
+# Cap the restart rate on a hard crash-loop
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=1000
+ExecStart=/usr/bin/flock -xn $HOME/.Q4D/.logDaemon.lck -c $HOME/.Q4D/LogD.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

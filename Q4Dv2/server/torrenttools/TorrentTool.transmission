@@ -1,0 +1,25 @@
+# TorrentTool.transmission - Transmission (*UNTESTED*)
+#
+# Hook (transmission-daemon/settings.json) - the hook passes NO arguments;
+# details come from the TR_* environment variables:
+#   "script-torrent-done-enabled": true,
+#   "script-torrent-done-filename": "/home/YOU/.Q4D/Queue4Download.sh",
+#
+# GetPayloadDetails: no args (fills the payload record via payload_set
+#   from the TR_* environment)
+# Labelling: none by default
+
+function GetPayloadDetails()
+{
+    payload_set KEY "$TR_TORRENT_NAME"
+    payload_set HASH "$TR_TORRENT_HASH"
+    payload_set LABEL "$TR_TORRENT_LABELS"
+    payload_set TRACKER "$TR_TORRENT_TRACKERS"
+    payload_set PATH "$TR_TORRENT_DIR"
+}
+
+function SetLabel()
+{
+    echo "no labelling tool (TorrentTool.transmission) - label '$2' ignored"
+    return 0
+}

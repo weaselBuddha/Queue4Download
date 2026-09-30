@@ -1,0 +1,21 @@
+[Unit]
+# Systemd start-up for the ProcessEvent daemon at home
+Description=Q4D Process Event daemon
+After=network-online.target
+Wants=network-online.target
+# Cap the restart rate on a hard crash-loop
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# v2: use a username, not a raw UID
+User=1000
+# v2: daemon lock moved out of /tmp (a stale lock FILE never blocks flock -
+# the lock dies with the process - so no ExecStartPre cleanup is needed)
+ExecStart=/usr/bin/flock -xn $HOME/.Q4D/.processEvent.lck -c $HOME/.Q4D/ProcessEvent.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

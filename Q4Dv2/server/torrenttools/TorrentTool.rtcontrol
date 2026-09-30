@@ -1,0 +1,32 @@
+# TorrentTool.rtcontrol - rTorrent + pyroscope (rtcontrol)
+#
+# Hook (.rtorrent.rc) - single argument (torrent info hash):
+#   method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.hash)"
+#
+# GetPayloadDetails arg: $1 = torrent info hash (ID)
+#   (fills the payload record via payload_set: KEY HASH LABEL TRACKER PATH)
+# Labelling: rtcontrol custom_1  (pyroscope: https://github.com/kannibalox/pyrosimple)
+
+readonly _RTCONTROL=~/bin/rtcontrol
+
+function GetPayloadDetails()
+{
+    local _id=$1
+
+    # Key on the info hash (ID), not the name: exact match, no name
+    # sanitisation, and safe inside the rtorrent hook string (a name could
+    # carry quotes/brackets). One query per field (rtcontrol's multi-field
+    # output is space-joined, which mis-parses when a field is empty - keep
+    # one value per call).
+
+    payload_set HASH "${_id}"
+    payload_set KEY "$(${_RTCONTROL} -q "hash=${_id}" -o "name")"
+    payload_set LABEL "$(${_RTCONTROL} -q "hash=${_id}" -o "custom_1")"
+    payload_set TRACKER "$(${_RTCONTROL} -q "hash=${_id}" -o "tracker")"
+    payload_set PATH "$(${_RTCONTROL} -q "hash=${_id}" -o "path")"
+}
+
+function SetLabel()
+{
+    ${_RTCONTROL} "hash=$1" --custom "1=$2"
+}

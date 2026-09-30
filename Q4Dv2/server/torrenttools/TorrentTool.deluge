@@ -1,0 +1,30 @@
+# TorrentTool.deluge - Deluge (local daemon) with the Execute plugin
+#
+# Hook (Execute plugin) - the plugin provides the three parameters by default:
+#   ~/.Q4D/Queue4Download.sh "%H" "%N" "%P"
+#
+# GetPayloadDetails args: $1 = hash, $2 = name, $3 = path
+#   (fills the payload record via payload_set)
+# Labelling: labellers/delugeLabeller.py  (pip install deluge-client)
+
+readonly _DELUGECONSOLE=/usr/bin/deluge-console
+
+function GetPayloadDetails()
+{
+    local _info
+
+    # One deluge-console call serves both label and tracker (deluge lists
+    # every tracker; the first line is the one we record).
+    _info=$(${_DELUGECONSOLE} "info -v" "$1")
+
+    payload_set HASH "$1"
+    payload_set KEY "$2"
+    payload_set LABEL "$(grep "Label: " <<< "${_info}" | head -1 | cut -d' ' -f 2)"
+    payload_set TRACKER "$(grep "Tracker: " <<< "${_info}" | head -1 | cut -d' ' -f 2-)"
+    payload_set PATH "$3"
+}
+
+function SetLabel()
+{
+    python3 "$Q4D_PATH/labellers/delugeLabeller.py" "$1" "$2"
+}

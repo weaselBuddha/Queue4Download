@@ -1,0 +1,16 @@
+# editor swap/backup files
+*.swp
+*.swo
+*~
+
+# python
+__pycache__/
+*.pyc
+
+# os
+.DS_Store
+
+# local archives (keep the repo source-only)
+*.tar.z
+*.tar.gz
+*.tgz

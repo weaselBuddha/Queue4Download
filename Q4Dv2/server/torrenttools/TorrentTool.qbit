@@ -1,0 +1,22 @@
+# TorrentTool.qbit - qBittorrent
+#
+# Hook (qBittorrent: Downloads -> "Run external program on torrent completion"):
+#   ~/.Q4D/Queue4Download.sh "%N" %I %L %T "%F"
+#
+# GetPayloadDetails args: $1 = name, $2 = hash, $3 = label, $4 = tracker, $5 = path
+#   (fills the payload record via payload_set)
+# Labelling: labellers/qbitLabeller.py  (pip install qbittorrent-api)
+
+function GetPayloadDetails()
+{
+    payload_set KEY "$1"
+    payload_set HASH "$2"
+    payload_set LABEL "$3"
+    payload_set TRACKER "$4"
+    payload_set PATH "$5"
+}
+
+function SetLabel()
+{
+    python3 "$Q4D_PATH/labellers/qbitLabeller.py" "$1" "$2"
+}

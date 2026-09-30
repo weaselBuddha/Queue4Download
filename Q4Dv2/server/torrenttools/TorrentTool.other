@@ -1,0 +1,23 @@
+# TorrentTool.other - generic: provide all torrent details as parameters
+#
+# Hook: ~/.Q4D/Queue4Download.sh [NAME] [HASH] [LABEL] [TRACKER] [PATH]
+#
+# GetPayloadDetails args: $1 = name, $2 = hash, $3 = label, $4 = tracker, $5 = path
+#   (fills the payload record via payload_set)
+# Labelling: none by default
+
+function GetPayloadDetails()
+{
+    payload_set KEY "$1"
+    payload_set HASH "$2"
+    payload_set LABEL "$3"
+    payload_set TRACKER "$4"
+    payload_set PATH "$5"
+}
+
+function SetLabel()
+{
+    # Default is No Labelling
+    echo "no labelling tool (TorrentTool.other) - label '$2' ignored"
+    return 0
+}
