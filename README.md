@@ -15,6 +15,7 @@ Queue4Download addresses all of these issues - the scripts integrate directly wi
 - `Q4Dv2/` - current. Same architecture (MQTT event bus + LFTP transfer), reorganized by deployment role, with the v1 bug fixes applied. Full layout, the v1 -> v2 change list, logging and install details are in `Q4Dv2/README.md`.
 - `Q4D/` - the original (v1) flat layout, kept untouched for existing installs. The v2 installed layout (`~/.Q4D/`) is the same shape, so v1 users can adopt v2 file-for-file.
 
+**Q4Dv2 is a work in progress, testing and expansion is now being done.**
 
 ## Quick start (v2)
 
