@@ -48,7 +48,7 @@ Structure
   units (processEvent + logDaemon).
 
 Bug fixes (from the v1 review)
-- B1  aria2 PATH was the literal string "[KEY]" (missing braces) - TorrentTool.aria2
+- B1  aria2 removed as tool
 - B2  `$Q_FAILED` typo (empty label on failure) -> `$Q_FAIL`, defined once
 - B3  MarkQueued `[[ ${_sent} ]]` was always true -> `[[ ${_sent} == 0 ]]`
 - B4  LFTPtransfer `[[ $LABELLING && ... ]]` was always true ("false" is
