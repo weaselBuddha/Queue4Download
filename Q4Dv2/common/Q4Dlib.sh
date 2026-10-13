@@ -14,6 +14,8 @@
 #                              bus -> "Logs" channel
 #   log_pub <SEV> <msg>        the bus sink for log(): one "Logs" channel
 #                              event (central flat file, written by LogD.sh)
+#   bus_auth <array> <pub|sub> fills <array> (passed by name) with the
+#                              client's auth args (see bus_auth)
 #   PublishEvent <ch> <event>  returns the publisher's exit status, prints nothing
 #   GetEvent <channel>         prints one payload, returns the subscriber's status
 #   WaitLock <lockfile>        blocks until free, then holds it
@@ -53,6 +55,30 @@ function log()
     fi
 }
 
+## bus_auth <args-array> <pub|sub>
+## Fills <args-array> (passed by name) with the credentials for the
+## mosquitto <pub|sub> client. When the client's own config file exists
+## (install-broker.sh and 'install.sh client' write it - the username and
+## password, or the TLS certificate paths), the client reads the credentials
+## from there itself and nothing sensitive goes on the command line; the
+## array stays empty. Otherwise the array is filled with -u/-P from
+## Q4Dconfig.sh (both empty = no auth).
+function bus_auth()
+{
+    local -n _args=$1
+    local _cfg="${XDG_CONFIG_HOME:-${HOME}/.config}/mosquitto_$2"
+
+    if [[ -f "${_cfg}" ]]
+    then
+        _args=()
+    elif [[ -n "${BUS_USER}" || -n "${BUS_PW}" ]]
+    then
+        _args=(-u "${BUS_USER}" -P "${BUS_PW}")
+    else
+        _args=()
+    fi
+}
+
 ## log_pub <SEVERITY> <message>
 ## The bus-side sink for log(): publishes one line to the "Logs" channel,
 ## where LogD.sh writes it to the central flat file. Format:
@@ -60,11 +86,13 @@ function log()
 ## status. The message must be one line (publish line by line for captures).
 function log_pub()
 {
+    local -a _auth
     local _ts
 
     printf -v _ts '%(%Y-%m-%d %H:%M:%S)T' -1
-    "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "${LOG_CHANNEL}" -u "${BUS_USER}" -P "${BUS_PW}" \
-        -m "${_ts} | $1 | $2" -q 1
+    bus_auth _auth pub
+    "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "${LOG_CHANNEL}" \
+        -m "${_ts} | $1 | $2" -q 1 "${_auth[@]}"
 }
 
 ## PublishEvent <channel> <event>
@@ -76,7 +104,10 @@ function log_pub()
 ##     if PublishEvent ...; then
 function PublishEvent()
 {
-    "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "$1" -u "${BUS_USER}" -P "${BUS_PW}" -m "$2" -q 1
+    local -a _auth
+
+    bus_auth _auth pub
+    "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "$1" -m "$2" -q 1 "${_auth[@]}"
 }
 
 ## GetEvent <channel>
@@ -86,7 +117,10 @@ function PublishEvent()
 ##     IFS=$'\t' read -r -a _fields <<< "$_payload"
 function GetEvent()
 {
-    "${SUBSCRIBER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "$1" -u "${BUS_USER}" -P "${BUS_PW}" -C 1
+    local -a _auth
+
+    bus_auth _auth sub
+    "${SUBSCRIBER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "$1" -C 1 "${_auth[@]}"
 }
 
 ## WaitLock <lockfile>

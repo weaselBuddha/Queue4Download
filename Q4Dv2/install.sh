@@ -6,12 +6,24 @@
 #   install.sh server  [--client=NAME]        run on the seedbox (repo present)
 #   install.sh client [--seedbox=user@host]   run on the home server
 #
+# The broker (mosquitto) lives on the seedbox: install-broker.sh sets it up
+# there (package or static, the auth, the daemon) and writes
+# ~/.Q4D/broker.conf, which the server install below reads for its broker
+# defaults.
+#
 # server steps:
-#   1. select the torrent tool (or --client=NAME)
+#   1. select the torrent tool (prompted; --client=NAME overrides the prompt)
 #   2. lay out common/ + server/ flat into ~/.Q4D/
 #   3. verify the tool defines GetPayloadDetails + SetLabel
-#   4. ask broker coordinates and the log mode (into Q4Dconfig.sh)
-#   5. record the repo path in ~/.Q4D/.q4d-repo (for the client install)
+#   4. ask about labelling (warn when the tool cannot set labels)
+#   5. ask broker coordinates (defaults from ~/.Q4D/broker.conf when
+#      present, else the network address)
+#   6. ask the log mode (into Q4Dconfig.sh)
+#   7. show the type codes (Types.config + default type), offer an edit
+#   8. install the daemons on the seedbox: LabelD when labelling is on,
+#      LogD when bus mode is chosen (systemd, or cron when sudo is not
+#      available)
+#   9. record the repo path in ~/.Q4D/.q4d-repo (for the client install)
 #
 # client steps:
 #   1. resolve the seedbox (user@host)
@@ -19,11 +31,12 @@
 #   3. verify SFTP access to the seedbox (lftp)
 #   4. pull the shared config + the client files over SFTP (lftp)
 #   5. make the local config machine-local (Q4D_ROLE=client, flat-mode log file)
-#   6. verify the MQTT broker (best effort)
-#   7. walk the server's Types.config codes -> local destination directories
-#   8. ask the LFTP settings, generate Q4Dclient.sh
-#   9. sync the LABELLING switch with the seedbox
-#   10. install the systemd units (processEvent, logDaemon)
+#   6. write the mosquitto client auth files (credentials off the command line)
+#   7. verify the MQTT broker (best effort)
+#   8. walk the server's Types.config codes -> local destination directories
+#   9. ask the LFTP settings, generate Q4Dclient.sh
+#   10. sync the LABELLING switch with the seedbox
+#   11. install the systemd units (processEvent, logDaemon)
 #
 # One-liner for the home server (prompts read the pipe's stdin, so every
 # question takes its default - run install.sh from disk to answer them):
@@ -96,6 +109,50 @@ function require_opt()
     fi
 
     return ${_rc}
+}
+
+## have_sudo
+## True when this user can run root commands (root, or passwordless sudo -
+## or a passworded sudo asked exactly once, but only on a tty: on a pipe
+## the install one-liner runs, a bare sudo would hang waiting for a
+## password that cannot be typed).
+function have_sudo()
+{
+    if [[ ${EUID} -eq 0 ]]
+    then
+        return 0
+    fi
+
+    if ! command -v sudo >/dev/null
+    then
+        return 1
+    fi
+
+    if sudo -n true 2>/dev/null
+    then
+        return 0
+    fi
+
+    if [[ -t 0 ]]
+    then
+        sudo true 2>/dev/null
+        return $?
+    fi
+
+    return 1
+}
+
+## run_root <cmd...>
+## Runs <cmd...> as root (directly when already root, via sudo otherwise).
+## Only call it after have_sudo has passed.
+function run_root()
+{
+    if [[ ${EUID} -eq 0 ]]
+    then
+        "$@"
+    else
+        sudo "$@"
+    fi
 }
 
 ## seedbox_user <seedbox>
@@ -258,6 +315,147 @@ function ask_tool()
     printf '%s' "${_client}"
 }
 
+## net_address
+## Prints this machine's network address - what another machine would use to
+## reach it: a WireGuard/tunnel address first (the usual seedbox case), then
+## the first non-loopback IPv4, and 127.0.0.1 when nothing is found.
+function net_address()
+{
+    local _a
+
+    _a=$(ip -4 -o addr show 2>/dev/null \
+        | awk '$2 ~ /^(wg|tun)[0-9]*$/ { split($4, _p, "/"); print _p[1]; exit }')
+    if [[ -n "${_a}" ]]
+    then
+        printf '%s' "${_a}"
+        return 0
+    fi
+
+    for _a in $(hostname -I 2>/dev/null)
+    do
+        case "${_a}" in
+            127.*|169.254.*) continue ;;
+        esac
+        printf '%s' "${_a}"
+        return 0
+    done
+
+    printf '%s' "127.0.0.1"
+}
+
+## broker_conf <key>
+## Prints the value of KEY in ~/.Q4D/broker.conf (written by
+## install-broker.sh); empty when the file or the key is absent.
+function broker_conf()
+{
+    local _f="${HOME}/.Q4D/broker.conf"
+
+    [[ -f "${_f}" ]] || return 0
+    grep "^${1}=" "${_f}" | head -n1 | cut -d= -f2-
+}
+
+## has_labeller <toolfile>
+## True when the tool's SetLabel really sets a label (the stock stubs print
+## "no labelling tool").
+function has_labeller()
+{
+    ! grep -q "no labelling tool" "$1"
+}
+
+## list_type_codes <dest>
+## Prints the codes the server will apply (the Types.config codes plus
+## DEFAULT_TYPE), deduplicated, space separated.
+function list_type_codes()
+{
+    local _dest=$1
+
+    {
+        grep -Ev "^(#|\s*$)" "${_dest}/Types.config" | awk '{print $4}'
+        grep 'DEFAULT_TYPE=' "${_dest}/Q4Dserver.sh" | cut -d'"' -f2
+    } | sort -u | paste -sd' '
+}
+
+## show_type_codes <dest>
+## Shows the installed Types.config: the active rules, the codes in use and
+## the default type; offers an editor round when the user wants to change
+## them (the client installer walks these codes into directories).
+function show_type_codes()
+{
+    local _dest=$1
+    local _file="${_dest}/Types.config"
+    local _rule
+
+    echo "Type codes: ${_file}"
+    while IFS= read -r _rule
+    do
+        msg "rule: ${_rule}"
+    done < <(grep -Ev "^(#|\s*$)" "${_file}")
+    msg "codes in use: $(list_type_codes "${_dest}")"
+    msg "default type: $(grep 'DEFAULT_TYPE=' "${_dest}/Q4Dserver.sh" | cut -d'"' -f2)"
+
+    if [[ "$(prompt "edit the type codes now?" "n")" == "y" && -n "${EDITOR:-}" ]]
+    then
+        "${EDITOR}" "${_file}"
+        msg "codes in use now: $(list_type_codes "${_dest}")"
+    fi
+}
+
+## install_daemon <name> <unitfile> <flock-command>
+## Installs the <name> daemon: the <name>.service unit when root/sudo allows
+## it (have_sudo: a passworded sudo is asked once on a tty, and never on a
+## pipe - a bare sudo would hang waiting for a password), otherwise cron -
+## an @reboot start plus a per-minute keepalive. <flock-command> must use
+## absolute paths, begin with its own flock (a double start is then
+## harmless) and end with the daemon's stray-output redirect.
+function install_daemon()
+{
+    local _name=$1
+    local _unitfile=$2
+    local _cmd=$3
+    local _unit="${_name}.service"
+    local _unitdest="/etc/systemd/system/${_unit}"
+    local _user
+    local _how=""
+    local _rc=1
+
+    _user=$(id -un)
+
+    if [[ ${EUID} -eq 0 ]]
+    then
+        cp "${_unitfile}" "${_unitdest}" && \
+        sed -i "s|^User=.*|User=${_user}|" "${_unitdest}" && \
+        systemctl daemon-reload && \
+        systemctl enable "${_unit}" && \
+        _how=systemd && _rc=0
+    elif have_sudo
+    then
+        run_root cp "${_unitfile}" "${_unitdest}" && \
+        run_root sed -i "s|^User=.*|User=${_user}|" "${_unitdest}" && \
+        run_root systemctl daemon-reload && \
+        run_root systemctl enable "${_unit}" && \
+        _how=systemd && _rc=0
+    else
+        local _crontab
+        _crontab=$(crontab -l 2>/dev/null | grep -vF "# Q4D ${_name}")
+        {
+            [[ -n "${_crontab}" ]] && printf '%s\n' "${_crontab}"
+            echo "@reboot ${_cmd} # Q4D ${_name}"
+            echo "* * * * * ${_cmd} || true # Q4D ${_name}"
+        } | crontab - && _how=cron && _rc=0
+    fi
+
+    if [[ ${_rc} -eq 0 ]]
+    then
+        msg "${_name}: installed (${_how})"
+    else
+        msg "${_name}: install it manually"
+        msg "  systemd: cp ${_unitfile} ${_unitdest}  # set User=${_user}, daemon-reload, enable"
+        msg "  cron:    @reboot ${_cmd}"
+    fi
+
+    return ${_rc}
+}
+
 ## lay_out_server <repo> <dest> <client>
 ## Flat layout: common/ + server/ into <dest>, tool selected by name.
 function lay_out_server()
@@ -295,6 +493,11 @@ function install_server()
     local _dest="${HOME}/.Q4D"
     local _client=""
     local _requested=""
+    local _labelling=""
+    local _bhost=""
+    local _bport=""
+    local _buser=""
+    local _bpw=""
     local _logmode=""
     local _rc=0
 
@@ -337,16 +540,37 @@ function install_server()
         fi
     fi
 
-    # 4. Broker coordinates (the broker lives on the HOME server).
+    # 4. Ask about labelling (warn when the tool cannot set labels).
     if [[ ${_rc} -eq 0 ]]
     then
-        set_config "${_dest}/Q4Dconfig.sh" BUS_HOST "$(prompt "broker host (home server IP, e.g. WireGuard)" "127.0.0.1")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_PORT "$(prompt "broker port" "1883")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_USER "$(prompt "MQTT username" "mosquitto_user")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_PW "$(prompt "MQTT password" "mqtt_password")"
+        _labelling=$(prompt "label torrents on completion (DONE/NOPE)?" "true")
+        set_config "${_dest}/Q4Dconfig.sh" LABELLING "${_labelling}"
+        if [[ "${_labelling}" == "true" ]] && ! has_labeller "${_dest}/TorrentTool.sh"
+        then
+            msg "note: TorrentTool.${_client} cannot set labels - labelling will be a no-op"
+        fi
     fi
 
-    # 5. Logging sink for the whole system (either/or; the client gets it
+    # 5. Broker coordinates (the broker lives on THIS seedbox - install-
+    #    broker.sh wrote ~/.Q4D/broker.conf when it ran; else the network
+    #    address) and the log mode.
+    if [[ ${_rc} -eq 0 ]]
+    then
+        _bhost=$(broker_conf HOST); _bhost=${_bhost:-$(net_address)}
+        _bport=$(broker_conf PORT); _bport=${_bport:-1883}
+        _buser=$(broker_conf USER); _buser=${_buser:-mosquitto_user}
+        _bpw=$(broker_conf PW);     _bpw=${_bpw:-mqtt_password}
+        set_config "${_dest}/Q4Dconfig.sh" BUS_HOST "$(prompt "broker host (seedbox address the home server uses)" "${_bhost}")"
+        set_config "${_dest}/Q4Dconfig.sh" BUS_PORT "$(prompt "broker port" "${_bport}")"
+        set_config "${_dest}/Q4Dconfig.sh" BUS_USER "$(prompt "MQTT username" "${_buser}")"
+        set_config "${_dest}/Q4Dconfig.sh" BUS_PW "$(prompt "MQTT password" "${_bpw}")"
+        if [[ ! -f "${_dest}/broker.conf" ]]
+        then
+            msg "note: no ~/.Q4D/broker.conf - run install-broker.sh on this seedbox to set up the broker"
+        fi
+    fi
+
+    # 6. Logging sink for the whole system (either/or; the client gets it
     #    with the copied Q4Dconfig.sh). This machine's role is recorded, and
     #    flat mode asks for this machine's log file (the client installer
     #    asks for its own).
@@ -361,7 +585,32 @@ function install_server()
         fi
     fi
 
-    # 6. Record the repo path - the client installer pulls client files from there.
+    # 7. Show the type codes (offer an edit) - the client installer walks
+    #    these codes into destination directories.
+    if [[ ${_rc} -eq 0 ]]
+    then
+        step warn show_type_codes "${_dest}"
+    fi
+
+    # 8. Install the daemons on the seedbox: LabelD when labelling is on,
+    #    LogD when bus mode is chosen (systemd when root/sudo, else cron -
+    #    the cron fallback needs flock, so check it once).
+    if [[ ${_rc} -eq 0 ]] && ! command -v flock >/dev/null
+    then
+        msg "note: flock not found - the cron daemon fallback needs it (util-linux)"
+    fi
+    if [[ ${_rc} -eq 0 && "${_labelling}" == "true" ]]
+    then
+        step warn install_daemon labelDaemon "${_repo}/server/labelDaemon.service" \
+            "$(command -v flock) -xn ${_dest}/.labelDaemon.lck -c '${_dest}/LabelD.sh' >> ${_dest}/labeld.log 2>&1"
+    fi
+    if [[ ${_rc} -eq 0 && "${_logmode}" == "bus" ]]
+    then
+        step warn install_daemon logDaemon "${_repo}/client/logDaemon.service" \
+            "$(command -v flock) -xn ${_dest}/.logDaemon.lck -c '${_dest}/LogD.sh' >> ${_dest}/logd.log 2>&1"
+    fi
+
+    # 9. Record the repo path - the client installer pulls client files from there.
     if [[ ${_rc} -eq 0 ]]
     then
         echo "${_repo}" > "${_dest}/.q4d-repo"
@@ -501,7 +750,7 @@ function collect_type_codes()
     # duplicate default.
     # shellcheck disable=SC2016  # remote shell code; \$4 and the quotes are deliberate
     run_ssh "${_key}" "${_seedbox}" \
-        'grep -Ev "^(#|\s*$)" ~/.Q4D/Types.config | awk "{print \$4}" | sort -u; grep "^DEFAULT_TYPE=" ~/.Q4D/Q4Dserver.sh | cut -d"\"" -f2' \
+        'grep -Ev "^(#|\s*$)" ~/.Q4D/Types.config | awk "{print \$4}" | sort -u; grep "DEFAULT_TYPE=" ~/.Q4D/Q4Dserver.sh | cut -d"\"" -f2' \
         | sort -u
 }
 
@@ -631,7 +880,8 @@ function sync_labelling()
 ## install_unit <dest> <name>
 ## Installs and enables <dest>/<name>.service for the invoking user.
 ## The unit is the copy pulled into <dest> (the repo copy does not exist
-## when install.sh arrives over a pipe).
+## when install.sh arrives over a pipe). Sudo is only tried when have_sudo
+## passes (a bare sudo on a pipe would hang waiting for a password).
 function install_unit()
 {
     local _dest=$1
@@ -650,12 +900,12 @@ function install_unit()
         systemctl daemon-reload && \
         systemctl enable "${_name}.service" && \
         _rc=0
-    elif command -v sudo >/dev/null
+    elif have_sudo
     then
-        sudo cp "${_unit}" "${_unitdest}" && \
-        sudo sed -i "s|^User=.*|User=${_user}|" "${_unitdest}" && \
-        sudo systemctl daemon-reload && \
-        sudo systemctl enable "${_name}.service" && \
+        run_root cp "${_unit}" "${_unitdest}" && \
+        run_root sed -i "s|^User=.*|User=${_user}|" "${_unitdest}" && \
+        run_root systemctl daemon-reload && \
+        run_root systemctl enable "${_name}.service" && \
         _rc=0
     fi
 
@@ -700,6 +950,93 @@ function step()
     if [[ ${_mode} == warn ]]
     then
         _rc=0
+    fi
+
+    return ${_rc}
+}
+
+## remote_broker_auth <seedbox> <key>
+## Prints the broker's auth mode (the AUTH line of the seedbox's
+## ~/.Q4D/broker.conf, written by install-broker.sh); empty when absent.
+function remote_broker_auth()
+{
+    local _seedbox=$1
+    local _key=$2
+
+    run_ssh "${_key}" "${_seedbox}" \
+        'grep "^AUTH=" ~/.Q4D/broker.conf 2>/dev/null | head -n1 | cut -d= -f2'
+}
+
+## write_client_auth <dest> <seedbox> <key>
+## Writes this machine's mosquitto_pub/sub client config files (the ones
+## Q4Dlib.sh's bus_auth looks for - credentials off the command line).
+## username mode: the credentials come from the pulled Q4Dconfig.sh.
+## tls mode: the client cert + CA come over SFTP from the seedbox
+## (install-broker.sh keeps them user-readable at ~/.Q4D/mosquitto/tls).
+## none mode: no auth file is needed (nothing is written).
+function write_client_auth()
+{
+    local _dest=$1
+    local _seedbox=$2
+    local _key=$3
+    local _vals=()
+    local _buser
+    local _bpw
+    local _mode
+    local _rc=0
+
+    mapfile -t _vals < <(bash -c "source '${_dest}/Q4Dconfig.sh'; printf '%s\n' \"\$BUS_USER\" \"\$BUS_PW\"")
+    _buser="${_vals[0]:-}"
+    _bpw="${_vals[1]:-}"
+
+    _mode=$(remote_broker_auth "${_seedbox}" "${_key}")
+
+    case "${_mode:-username}" in
+        tls)
+            mkdir -p "${_dest}/mosquitto/tls"
+            if run_lftp "${_key}" "${_seedbox}" \
+                "lcd \"${_dest}/mosquitto/tls\"; get ~/.Q4D/mosquitto/tls/ca.crt ~/.Q4D/mosquitto/tls/client.crt ~/.Q4D/mosquitto/tls/client.key"
+            then
+                chmod 600 "${_dest}/mosquitto/tls/client.key" "${_dest}/mosquitto/tls/ca.crt" "${_dest}/mosquitto/tls/client.crt" 2>/dev/null
+                _rc=0
+            else
+                msg "client auth: could not pull the TLS client cert from the seedbox"
+                _rc=1
+            fi
+            ;;
+        none)
+            msg "client auth: the broker has no auth - nothing to write"
+            ;;
+        *)
+            if [[ -z "${_buser}" && -z "${_bpw}" ]]
+            then
+                msg "client auth: no credentials in Q4Dconfig.sh - nothing to write"
+            else
+                _rc=0
+            fi
+            ;;
+    esac
+
+    if [[ ${_rc} -eq 0 ]]
+    then
+        local _cfg="${XDG_CONFIG_HOME:-${HOME}/.config}"
+        local _f
+        mkdir -p "${_cfg}" || return 1
+        for _f in "${_cfg}/mosquitto_pub" "${_cfg}/mosquitto_sub"
+        do
+            if [[ "${_mode:-username}" == "tls" ]]
+            then
+                printf -- '--cafile %s\n--cert %s\n--key %s\n' \
+                    "${_dest}/mosquitto/tls/ca.crt" "${_dest}/mosquitto/tls/client.crt" "${_dest}/mosquitto/tls/client.key" > "${_f}"
+            elif [[ "${_mode:-username}" == "username" && ( -n "${_buser}" || -n "${_bpw}" ) ]]
+            then
+                printf -- '-u %s\n-P %s\n' "${_buser}" "${_bpw}" > "${_f}"
+            else
+                : > "${_f}"
+            fi
+            chmod 600 "${_f}" || return 1
+        done
+        msg "client auth files: ${_cfg}/mosquitto_pub, ${_cfg}/mosquitto_sub (mode: ${_mode:-username})"
     fi
 
     return ${_rc}
@@ -775,13 +1112,20 @@ function install_client()
         fi
     fi
 
-    # 6. Verify the MQTT broker (best effort - a failure only warns).
+    # 6. Write the mosquitto client auth files (credentials off the
+    #    command line) - best effort: a failure warns, the install goes on.
+    if [[ ${_rc} -eq 0 ]]
+    then
+        step warn write_client_auth "${_dest}" "${_seedbox}" "${_key}"
+    fi
+
+    # 7. Verify the MQTT broker (best effort - a failure only warns).
     if [[ ${_rc} -eq 0 ]]
     then
         step warn check_broker "${_dest}"
     fi
 
-    # 7. Walk the server's type codes; define a local directory for each.
+    # 8. Walk the server's type codes; define a local directory for each.
     if [[ ${_rc} -eq 0 ]]
     then
         echo
@@ -793,7 +1137,7 @@ function install_client()
         _map=$(build_type_code_map "${_codes}") || _rc=1
     fi
 
-    # 8. LFTP settings -> Q4Dclient.sh.
+    # 9. LFTP settings -> Q4Dclient.sh.
     if [[ ${_rc} -eq 0 ]]
     then
         _host=$(prompt "LFTP host (seedbox as seen from home)" "$(seedbox_host "${_seedbox}")")
@@ -803,13 +1147,13 @@ function install_client()
         generate_client_config "${_dest}" "${_key}" "${_map}" "${_host}" "${_creds}" "${_threads}" "${_segments}" || _rc=1
     fi
 
-    # 9. Keep the labelling switch in agreement with the seedbox.
+    # 10. Keep the labelling switch in agreement with the seedbox.
     if [[ ${_rc} -eq 0 ]]
     then
         step fatal sync_labelling "${_seedbox}" "${_dest}" "${_key}" || _rc=1
     fi
 
-    # 10. Install the systemd units (best effort - hints when it cannot).
+    # 11. Install the systemd units (best effort - hints when it cannot).
     if [[ ${_rc} -eq 0 ]]
     then
         step warn install_systemd_units "${_dest}"

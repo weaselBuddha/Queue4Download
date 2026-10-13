@@ -1,0 +1,263 @@
+# mosquitto-static.yml - build a solid cross-distro static mosquitto tarball
+#
+# Fully static x86_64 binaries (musl libc + static OpenSSL), so the tarball
+# runs on any Linux distro (Debian, Ubuntu, RHEL, Alpine, ...) with no
+# package dependencies. Q4Dv2's install-broker.sh downloads this tarball
+# when the seedbox has no mosquitto and no sudo.
+#
+# The recipe is verified end-to-end: every binary is checked to be fully
+# statically linked, and a smoke test runs a real broker (username/password
+# AND TLS client-cert auth) before the tarball is published. A build that
+# is not fully static fails the workflow - a broken tarball is never
+# released.
+#
+# Release: one GitHub release per mosquitto version, tag
+#   mosquitto-static-<version>   (e.g. mosquitto-static-2.0.22)
+# asset:
+#   mosquitto-<version>-static-x86_64-linux-musl.tar.xz (+ .sha256)
+
+name: mosquitto-static
+
+on:
+  workflow_dispatch:
+    inputs:
+      mosquitto_version:
+        description: "mosquitto release tag to build"
+        required: false
+        default: "v2.0.22"
+      openssl_version:
+        description: "OpenSSL release to build against (static, musl)"
+        required: false
+        default: "3.1.8"
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/mosquitto-static.yml"
+      - "Q4Dv2/install-broker.sh"
+      - "Q4Dv2/common/Q4Ddefines.sh"
+
+permissions:
+  contents: write   # create/update the release
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Versions
+        id: v
+        run: |
+          MOSQ="${{ github.event.inputs.mosquitto_version || 'v2.0.22' }}"
+          OSSL="${{ github.event.inputs.openssl_version || '3.1.8' }}"
+          # v2.0.22 -> 2.0.22 (tag carries a leading v, the tarball does not)
+          echo "mosq=${MOSQ}" >> "$GITHUB_OUTPUT"
+          echo "mosqver=${MOSQ#v}" >> "$GITHUB_OUTPUT"
+          echo "ossl=${OSSL}" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          # musl-dev/musl-tools: musl-gcc; linux-libc-dev: the kernel UAPI
+          # headers OpenSSL's mem_sec.c/ktls.h need (preinstalled on the
+          # runner via glibc, listed for clarity).
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake musl-dev musl-tools linux-libc-dev \
+            ca-certificates curl file xz-utils
+
+      - name: Static OpenSSL for musl
+        run: |
+          set -e
+          VER="${{ steps.v.outputs.ossl }}"
+          curl -fsSL -o ossl.tar.gz "https://www.openssl.org/source/openssl-${VER}.tar.gz"
+          tar xzf ossl.tar.gz
+          cd "openssl-${VER}"
+          # Note: "linux-musl" is not a 3.x target (removed in 3.0);
+          # linux-generic64 + musl-gcc is the musl build.
+          CC=musl-gcc ./Configure linux-generic64 no-shared no-tests -fPIC \
+            --prefix="$PWD/ossl-install" --openssldir="$PWD/ossl-ssl"
+          make -j"$(nproc)"
+          make install_sw install_ssldirs
+
+      - name: Kernel headers into the musl tree
+        run: |
+          # Debian/Ubuntu musl-gcc uses -nostdinc and only adds
+          # /usr/include/x86_64-linux-musl, so the kernel UAPI headers
+          # (linux/mman.h, ...) are invisible to it. Copy them into the
+          # musl tree (like a cross sysroot): the tree has no linux/ dir of
+          # its own, so nothing is shadowed.
+          set -e
+          M=/usr/include/x86_64-linux-musl
+          cp -a /usr/include/linux "${M}/"
+          cp -a /usr/include/asm-generic "${M}/"
+          cp -a "/usr/include/$(uname -m)-linux-gnu/asm" "${M}/asm"
+
+      - name: Build mosquitto (static, musl)
+        run: |
+          set -e
+          VER="${{ steps.v.outputs.mosq }}"
+          VERNO="${{ steps.v.outputs.mosqver }}"
+          curl -fsSL -o mosq.tar.gz \
+            "https://github.com/eclipse-mosquitto/mosquitto/archive/refs/tags/${VER}.tar.gz"
+          tar xzf mosq.tar.gz
+          # WITH_STATIC_LIBRARIES is what makes the executables link the
+          # static libmosquitto (without it they would dlopen the .so).
+          cmake -S "mosquitto-${VERNO}" -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=musl-gcc \
+            -DCMAKE_EXE_LINKER_FLAGS=-static \
+            -DOPENSSL_ROOT_DIR="$PWD/openssl-${{ steps.v.outputs.ossl }}/ossl-install" \
+            -DWITH_TLS=ON \
+            -DWITH_TLS_PSK=ON \
+            -DWITH_EC=ON \
+            -DWITH_WEBSOCKETS=OFF \
+            -DWITH_CJSON=OFF \
+            -DWITH_PLUGINS=OFF \
+            -DWITH_STATIC_LIBRARIES=ON \
+            -DDOCUMENTATION=OFF
+          cmake --build build -j"$(nproc)"
+
+      - name: Verify fully static
+        run: |
+          set -e
+          VERNO="${{ steps.v.outputs.mosqver }}"
+          B=build
+          for x in src/mosquitto client/mosquitto_pub client/mosquitto_sub \
+                   client/mosquitto_rr apps/mosquitto_passwd/mosquitto_passwd
+          do
+            f="${B}/${x}"
+            echo "checking ${f}"
+            file "${f}" | grep -q "statically linked"
+            ldd "${f}" 2>&1 | grep -q "not a dynamic executable"
+          done
+
+      - name: Smoke test (username/password + TLS cert auth)
+        run: |
+          set -e
+          VERNO="${{ steps.v.outputs.mosqver }}"
+          B="build"
+          S="smoke"
+          mkdir -p "${S}" && cd "${S}"
+          # mosquitto_pub/sub read their client config from
+          # $XDG_CONFIG_HOME (or $HOME/.config) - point both here, so the
+          # config-file auth below is what is actually tested.
+          export HOME="${PWD}" XDG_CONFIG_HOME="${PWD}/.config"
+
+          # --- username/password broker on 127.0.0.1:1883 -----------------
+          PW="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          "${B}/apps/mosquitto_passwd/mosquitto_passwd" -c -b passwd q4dtest "${PW}"
+          cat > plain.conf <<EOF
+          listener 1883 127.0.0.1
+          allow_anonymous false
+          password_file $(pwd)/passwd
+          EOF
+          "${B}/src/mosquitto" -c plain.conf -d
+          sleep 1
+
+          # client auth from the config file - nothing sensitive on the
+          # command line (this is exactly how the Q4D runtime does it).
+          # NOTE: mosquitto_pub/sub config files hold CLI option tokens
+          # (-u/-P, --cafile/...), not "key value" pairs.
+          mkdir -p .config
+          printf -- '-u q4dtest\n-P %s\n' "${PW}" > .config/mosquitto_pub
+          printf -- '-u q4dtest\n-P %s\n' "${PW}" > .config/mosquitto_sub
+          # subscribe first, then publish (QoS 1, no retained messages)
+          ( "${B}/client/mosquitto_sub" -h 127.0.0.1 -p 1883 -t q4d/smoke -C 1 -W 5 > sub.out ) &
+          SUBPID=$!
+          sleep 1
+          "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 1883 -t q4d/smoke -m hello -q 1
+          wait "${SUBPID}"
+          grep -q hello sub.out
+          # wrong credentials must be rejected
+          if "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 1883 -u q4dtest -P wrongpw -t q4d/smoke -m x -q 1 2>/dev/null
+          then echo "FAIL: bad password was accepted" && false; fi
+
+          # --- TLS broker with client-cert auth on 127.0.0.1:8883 ---------
+          O="ossl-${{ steps.v.outputs.ossl }}/ossl-install/bin/openssl"
+          "${O}" req -x509 -newkey rsa:4096 -sha256 -days 30 -nodes \
+            -keyout ca.key -out ca.crt -subj "/CN=Q4D smoke CA" 2>/dev/null
+          "${O}" req -newkey rsa:2048 -sha256 -nodes \
+            -keyout server.key -out server.csr -subj "/CN=127.0.0.1" 2>/dev/null
+          "${O}" x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out server.crt -days 30 \
+            -extfile <(printf "subjectAltName=IP:127.0.0.1") 2>/dev/null
+          "${O}" req -newkey rsa:2048 -sha256 -nodes \
+            -keyout client.key -out client.csr -subj "/CN=q4dtest" 2>/dev/null
+          "${O}" x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+            -out client.crt -days 30 2>/dev/null
+          # require_certificate is the auth gate; the CN becomes the
+          # username. allow_anonymous must be set explicitly: mosquitto
+          # 2.x disallows anonymous when any auth option is set and it is
+          # not (conf.c), and with no password file the connect check
+          # falls through to exactly that flag.
+          cat > tls.conf <<EOF
+          listener 8883 127.0.0.1
+          cafile $(pwd)/ca.crt
+          certfile $(pwd)/server.crt
+          keyfile $(pwd)/server.key
+          require_certificate true
+          use_identity_as_username true
+          allow_anonymous true
+          EOF
+          "${B}/src/mosquitto" -c tls.conf -d
+          sleep 1
+          printf -- '--cafile %s\n--cert %s\n--key %s\n' \
+            "$(pwd)/ca.crt" "$(pwd)/client.crt" "$(pwd)/client.key" > .config/mosquitto_pub
+          printf -- '--cafile %s\n--cert %s\n--key %s\n' \
+            "$(pwd)/ca.crt" "$(pwd)/client.crt" "$(pwd)/client.key" > .config/mosquitto_sub
+          ( "${B}/client/mosquitto_sub" -h 127.0.0.1 -p 8883 -t q4d/smoketls -C 1 -W 5 > subtls.out ) &
+          SUBPID=$!
+          sleep 1
+          "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 8883 -t q4d/smoketls -m secure -q 1
+          wait "${SUBPID}"
+          grep -q secure subtls.out
+
+          # a client without a certificate must be rejected (TLS layer)
+          # (HOME and XDG_CONFIG_HOME both pointed away from the cert config)
+          if HOME=/tmp/nonexistent-home XDG_CONFIG_HOME=/tmp/nonexistent-home/.config \
+              "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 8883 -t q4d/x -m y -q 1 2>/dev/null
+          then echo "FAIL: no-cert client was accepted" && false; fi
+
+      - name: Package tarball
+        run: |
+          set -e
+          VERNO="${{ steps.v.outputs.mosqver }}"
+          P="mosquitto-${VERNO}-static-x86_64-linux-musl"
+          mkdir -p "dist/${P}/bin"
+          cp build/src/mosquitto                          "dist/${P}/bin/mosquitto"
+          cp build/client/mosquitto_pub                   "dist/${P}/bin/mosquitto_pub"
+          cp build/client/mosquitto_sub                   "dist/${P}/bin/mosquitto_sub"
+          cp build/client/mosquitto_rr                    "dist/${P}/bin/mosquitto_rr"
+          cp build/apps/mosquitto_passwd/mosquitto_passwd "dist/${P}/bin/mosquitto_passwd"
+          echo "${VERNO}" > "dist/${P}/VERSION"
+          tar cJf "dist/${P}.tar.xz" -C dist "${P}"
+          ( cd dist && sha256sum "${P}.tar.xz" > "${P}.tar.xz.sha256" )
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mosquitto-static-${{ steps.v.outputs.mosqver }}
+          path: |
+            dist/*.tar.xz
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mosquitto-static-${{ steps.v.outputs.mosqver }}
+          name: mosquitto ${{ steps.v.outputs.mosqver }} (static, musl, x86_64)
+          body: |
+            Fully static mosquitto ${{ steps.v.outputs.mosqver }} for x86_64 Linux
+            (musl libc, static OpenSSL ${{ steps.v.outputs.ossl }}, TLS + PSK + EC).
+
+            Runs on any distro - no package dependencies.
+
+            - mosquitto (broker), mosquitto_pub, mosquitto_sub, mosquitto_rr, mosquitto_passwd
+            - username/password and TLS client-cert auth verified by smoke test
+
+            Used by Q4Dv2 install-broker.sh when the seedbox has no mosquitto
+            and no sudo.
+          files: |
+            dist/*.tar.xz
+            dist/*.sha256
+          fail_on_unmatched: false

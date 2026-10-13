@@ -7,6 +7,7 @@ reorganized by deployment role, with the v1 bug fixes applied.
 
     Q4Dv2/
     ├── install.sh                 server | client subcommands
+    ├── install-broker.sh          mosquitto broker + tools install (seedbox)
     ├── common/                    installed flat into ~/.Q4D/ on BOTH machines
     │   ├── Q4Dconfig.sh           bus coords, credentials, LABELLING, LOG_MODE,
     │                              per-machine log files, Q4D_ROLE
@@ -142,11 +143,57 @@ The server install asks for it once.
 - `install.sh` is a one-off: it prints to the terminal (msg/fail) and does
   not use the Q4D log.
 
-## Quick start
+## Broker (mosquitto)
+
+The broker lives on the seedbox and is assumed NOT behind a NAT: the home
+server reaches it directly, so the listener binds the seedbox's network
+address (WireGuard/tunnel address first, else the first non-loopback IPv4),
+never 127.0.0.1. `install.sh server` pre-fills its broker questions from
+`~/.Q4D/broker.conf`, which `install-broker.sh` writes.
 
     # seedbox
     git clone https://github.com/weaselBuddha/Queue4Download
-    ~/Queue4Download/Q4Dv2/install.sh server --client=rtcontrol
+    ~/Queue4Download/Q4Dv2/install-broker.sh     # broker + tools + auth + daemon
+    ~/Queue4Download/Q4Dv2/install.sh server     # Q4D itself (reads broker.conf)
+
+    # home server
+    ssh you@seedbox 'cat ~/Queue4Download/Q4Dv2/install.sh' | bash -s client you@seedbox
+
+install-broker.sh does not assume root, and only installs the static
+binary when mosquitto is not already there:
+
+- broker absent + sudo      -> distro package, configured in /etc/mosquitto
+                               (original config backed up)
+- broker absent, no sudo    -> static tarball into ~/.Q4D/mosquitto, daemon
+                               via a systemd user unit or cron (flock
+                               keepalive)
+- broker present + sudo     -> reconfigured in /etc/mosquitto, restarted
+- broker present, no sudo   -> missing client tools taken from the static
+                               tarball (the broker itself is left alone),
+                               manual steps printed for /etc/mosquitto
+
+Auth (chosen at install; the client config files it writes are what keep
+the credentials off every command line - see bus_auth in Q4Dlib.sh):
+
+- `username` (default) - mosquitto_passwd hash file, `-u`/`-P` in the
+  client config files
+- `tls` - self-generated CA + server + client certs under
+  `~/.Q4D/mosquitto/tls`, `require_certificate true` (the cert IS the
+  credential); the home server pulls its client cert in `install.sh client`
+- `none` - refused by default; a warning is printed (an unauthenticated
+  broker that is not behind a NAT is open to anyone who can reach it)
+
+The static tarball is built by the GitHub workflow
+`.github/workflows/mosquitto-static.yml` (musl libc + static OpenSSL,
+fully-static verified, smoke-tested with both auth modes) and published as
+the `mosquitto-static-<version>` GitHub release; install-broker.sh pins the
+release (override with `MOSQUITTO_STATIC_URL` or `--tarball=PATH`).
+
+## Quick start
+
+    # seedbox (the broker lives here - see Broker above)
+    ~/Queue4Download/Q4Dv2/install-broker.sh
+    ~/Queue4Download/Q4Dv2/install.sh server
 
     # home server
     ssh you@seedbox 'cat ~/Queue4Download/Q4Dv2/install.sh' | bash -s client you@seedbox

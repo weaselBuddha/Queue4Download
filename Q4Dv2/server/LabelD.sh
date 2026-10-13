@@ -36,7 +36,7 @@ function Check_Tool()
     then
         _rc=0
     else
-        log FAIL "Torrent tool missing or incomplete (need GetPayloadDetails and SetLabel) - see install.sh --client="
+        log FAIL "Torrent tool missing or incomplete (need GetPayloadDetails and SetLabel) - see 'install.sh server'"
     fi
 
     return ${_rc}

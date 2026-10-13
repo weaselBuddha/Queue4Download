@@ -25,6 +25,7 @@ readonly CENTRAL_LOG="$Q4D_PATH/Q4Dcentral.log"
 ## Subscribes forever.
 function Main()
 {
+    local -a _auth
     local _rc
 
     # Best effort in bus mode: published before the subscription below
@@ -33,7 +34,8 @@ function Main()
 
     while true
     do
-        "${SUBSCRIBER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "${LOG_CHANNEL}" -u "${BUS_USER}" -P "${BUS_PW}" >> "${CENTRAL_LOG}" 2>&1
+        bus_auth _auth sub
+        "${SUBSCRIBER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "${LOG_CHANNEL}" "${_auth[@]}" >> "${CENTRAL_LOG}" 2>&1
         _rc=$?
 
         if [[ ${_rc} -eq 0 ]]

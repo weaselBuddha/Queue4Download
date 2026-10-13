@@ -6,11 +6,17 @@
 # Requires Q4Dconfig.sh to be sourced first.
 # shellcheck disable=SC2034  # constants are consumed by the scripts that source this
 
-## Publisher/subscriber binaries: prefer what is on the PATH (the
-## pre-flight checks these exact paths), fall back to the distro location.
-PUBLISHER=$(command -v mosquitto_pub 2>/dev/null || echo /usr/bin/mosquitto_pub)
+## Publisher/subscriber binaries: prefer what is on the PATH, then the
+## static install (install-broker.sh, no root needed - this is what makes
+## it work under hooks/cron/systemd without PATH changes), then the distro
+## location.
+PUBLISHER=$(command -v mosquitto_pub 2>/dev/null) || \
+    PUBLISHER=${HOME}/.Q4D/mosquitto/bin/mosquitto_pub
+[[ -x ${PUBLISHER} ]] || PUBLISHER=/usr/bin/mosquitto_pub
 readonly PUBLISHER
-SUBSCRIBER=$(command -v mosquitto_sub 2>/dev/null || echo /usr/bin/mosquitto_sub)
+SUBSCRIBER=$(command -v mosquitto_sub 2>/dev/null) || \
+    SUBSCRIBER=${HOME}/.Q4D/mosquitto/bin/mosquitto_sub
+[[ -x ${SUBSCRIBER} ]] || SUBSCRIBER=/usr/bin/mosquitto_sub
 readonly SUBSCRIBER
 
 ## Event Channels

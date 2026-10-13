@@ -1,0 +1,23 @@
+[Unit]
+# Systemd start-up for the label daemon (LabelD.sh) on the seedbox.
+# Only needed when LABELLING=true (Q4Dconfig.sh): without it, nothing is
+# published on the "Label" channel for the daemon to apply.
+Description=Q4D label daemon
+After=network-online.target
+Wants=network-online.target
+# Cap the restart rate on a hard crash-loop
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# v2: use a username, not a raw UID (install_daemon rewrites this)
+User=1000
+# v2: daemon lock lives in $HOME/.Q4D (a stale lock FILE never blocks flock -
+# the lock dies with the process - so no ExecStartPre cleanup is needed)
+ExecStart=/usr/bin/flock -xn $HOME/.Q4D/.labelDaemon.lck -c $HOME/.Q4D/LabelD.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
