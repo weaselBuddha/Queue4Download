@@ -63,6 +63,20 @@ jobs:
             build-essential cmake musl-dev musl-tools linux-libc-dev \
             ca-certificates curl file xz-utils
 
+      - name: Kernel headers into the musl tree
+        run: |
+          # MUST run before any musl build: Debian/Ubuntu musl-gcc uses
+          # -nostdinc and only adds /usr/include/x86_64-linux-musl, so the
+          # kernel UAPI headers (linux/mman.h, ...) are invisible to it and
+          # OpenSSL's mem_sec.c/ktls.h fail to compile. Copy them into the
+          # musl tree (like a cross sysroot): the tree has no linux/ dir of
+          # its own, so nothing is shadowed.
+          set -e
+          M=/usr/include/x86_64-linux-musl
+          cp -a /usr/include/linux "${M}/"
+          cp -a /usr/include/asm-generic "${M}/"
+          cp -a "/usr/include/$(uname -m)-linux-gnu/asm" "${M}/asm"
+
       - name: Static OpenSSL for musl
         run: |
           set -e
@@ -76,19 +90,6 @@ jobs:
             --prefix="$PWD/ossl-install" --openssldir="$PWD/ossl-ssl"
           make -j"$(nproc)"
           make install_sw install_ssldirs
-
-      - name: Kernel headers into the musl tree
-        run: |
-          # Debian/Ubuntu musl-gcc uses -nostdinc and only adds
-          # /usr/include/x86_64-linux-musl, so the kernel UAPI headers
-          # (linux/mman.h, ...) are invisible to it. Copy them into the
-          # musl tree (like a cross sysroot): the tree has no linux/ dir of
-          # its own, so nothing is shadowed.
-          set -e
-          M=/usr/include/x86_64-linux-musl
-          cp -a /usr/include/linux "${M}/"
-          cp -a /usr/include/asm-generic "${M}/"
-          cp -a "/usr/include/$(uname -m)-linux-gnu/asm" "${M}/asm"
 
       - name: Build mosquitto (static, musl)
         run: |
