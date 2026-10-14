@@ -79,10 +79,12 @@ jobs:
             if [[ -d "${d}" ]]; then M="${d}"; break; fi
           done
           if [[ -z "${M}" ]]; then echo "musl include dir not found"; exit 1; fi
-          mkdir -p "${M}/linux" "${M}/asm-generic" "${M}/asm"
-          cp -a /usr/include/linux/. "${M}/linux/"
-          cp -a /usr/include/asm-generic/. "${M}/asm-generic/"
-          cp -a "/usr/include/$(uname -m)-linux-gnu/asm/." "${M}/asm/"
+          # sudo: the runner steps run as the unprivileged runner user, and
+          # the musl include tree is root-owned.
+          sudo mkdir -p "${M}/linux" "${M}/asm-generic" "${M}/asm"
+          sudo cp -a /usr/include/linux/. "${M}/linux/"
+          sudo cp -a /usr/include/asm-generic/. "${M}/asm-generic/"
+          sudo cp -a "/usr/include/$(uname -m)-linux-gnu/asm/." "${M}/asm/"
           echo "kernel headers copied into ${M}"
 
       - name: Static OpenSSL for musl
