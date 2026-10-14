@@ -65,17 +65,25 @@ jobs:
 
       - name: Kernel headers into the musl tree
         run: |
-          # MUST run before any musl build: Debian/Ubuntu musl-gcc uses
-          # -nostdinc and only adds /usr/include/x86_64-linux-musl, so the
-          # kernel UAPI headers (linux/mman.h, ...) are invisible to it and
-          # OpenSSL's mem_sec.c/ktls.h fail to compile. Copy them into the
-          # musl tree (like a cross sysroot): the tree has no linux/ dir of
-          # its own, so nothing is shadowed.
+          # MUST run before any musl build: the musl-gcc wrappers hide the
+          # kernel UAPI headers (linux/mman.h, ...) that OpenSSL's
+          # mem_sec.c/ktls.h need - either via -nostdinc (Debian-style
+          # multiarch tree) or because the musl tree simply has no linux/
+          # dir. Copy them into the musl tree (like a cross sysroot):
+          # the tree has no linux/ dir of its own, so nothing is shadowed.
+          # The tree location differs per distro, so detect it.
           set -e
-          M=/usr/include/x86_64-linux-musl
-          cp -a /usr/include/linux "${M}/"
-          cp -a /usr/include/asm-generic "${M}/"
-          cp -a "/usr/include/$(uname -m)-linux-gnu/asm" "${M}/asm"
+          M=""
+          for d in /usr/include/x86_64-linux-musl /usr/include/musl
+          do
+            if [[ -d "${d}" ]]; then M="${d}"; break; fi
+          done
+          if [[ -z "${M}" ]]; then echo "musl include dir not found"; exit 1; fi
+          mkdir -p "${M}/linux" "${M}/asm-generic" "${M}/asm"
+          cp -a /usr/include/linux/. "${M}/linux/"
+          cp -a /usr/include/asm-generic/. "${M}/asm-generic/"
+          cp -a "/usr/include/$(uname -m)-linux-gnu/asm/." "${M}/asm/"
+          echo "kernel headers copied into ${M}"
 
       - name: Static OpenSSL for musl
         run: |
@@ -104,7 +112,9 @@ jobs:
           cmake -S "mosquitto-${VERNO}" -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=musl-gcc \
-            -DCMAKE_EXE_LINKER_FLAGS=-static \
+            # -static: fully static; -lc: musl needs an explicit libc when
+            # statically linked (harmless where the gcc specs add it)
+            -DCMAKE_EXE_LINKER_FLAGS="-static -lc" \
             -DOPENSSL_ROOT_DIR="$PWD/openssl-${{ steps.v.outputs.ossl }}/ossl-install" \
             -DWITH_TLS=ON \
             -DWITH_TLS_PSK=ON \
