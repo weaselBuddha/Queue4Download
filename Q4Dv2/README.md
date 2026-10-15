@@ -1,6 +1,6 @@
 # Q4Dv2
 
-Refactored Queue4Download: same architecture (MQTT event bus + LFTP transfer),
+Refactored Queue4Download done in combination with a local AI (Qwen 3.8): same architecture (MQTT event bus + LFTP transfer),
 reorganized by deployment role, with the v1 bug fixes applied.
 
 ## Layout
