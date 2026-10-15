@@ -6,9 +6,10 @@
 # when the seedbox has no mosquitto and no sudo.
 #
 # The recipe is verified end-to-end: every binary is checked to be fully
-# statically linked, and a smoke test runs a real broker (username/password
-# AND TLS client-cert auth) before the tarball is published. A build that
-# is not fully static fails the workflow - a broken tarball is never
+# statically linked, and a smoke test runs a real broker with TLS
+# client-cert auth (the Q4Dv2 design - the cert is the credential, there
+# is no password auth) before the tarball is published. A build that is
+# not fully static fails the workflow - a broken tarball is never
 # released.
 #
 # Release: one GitHub release per mosquitto version, tag
@@ -142,65 +143,45 @@ jobs:
             ldd "${f}" 2>&1 | grep -q "not a dynamic executable"
           done
 
-      - name: Smoke test (username/password + TLS cert auth)
+      - name: Smoke test (TLS client-cert auth - the Q4Dv2 design)
         run: |
           set -e
-          VERNO="${{ steps.v.outputs.mosqver }}"
-          B="build"
-          S="smoke"
+          # Absolute paths: the test cd's into smoke/ below, so every
+          # reference to the build tree must stay absolute.
+          B="$(pwd)/build"
+          S="$(pwd)/smoke"
           mkdir -p "${S}" && cd "${S}"
           # mosquitto_pub/sub read their client config from
           # $XDG_CONFIG_HOME (or $HOME/.config) - point both here, so the
-          # config-file auth below is what is actually tested.
+          # config-file auth below is what is actually tested (this is
+          # exactly how the Q4D runtime does it).
           export HOME="${PWD}" XDG_CONFIG_HOME="${PWD}/.config"
+          # On any failure, dump the broker log (the broker runs in the
+          # background, its stderr goes to broker.log).
+          trap 'echo "=== broker log ==="; cat broker.log 2>/dev/null || true' ERR
 
-          # --- username/password broker on 127.0.0.1:1883 -----------------
-          PW="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-          "${B}/apps/mosquitto_passwd/mosquitto_passwd" -c -b passwd q4dtest "${PW}"
-          cat > plain.conf <<EOF
-          listener 1883 127.0.0.1
-          allow_anonymous false
-          password_file $(pwd)/passwd
-          EOF
-          "${B}/src/mosquitto" -c plain.conf -d
-          sleep 1
-
-          # client auth from the config file - nothing sensitive on the
-          # command line (this is exactly how the Q4D runtime does it).
-          # NOTE: mosquitto_pub/sub config files hold CLI option tokens
-          # (-u/-P, --cafile/...), not "key value" pairs.
-          mkdir -p .config
-          printf -- '-u q4dtest\n-P %s\n' "${PW}" > .config/mosquitto_pub
-          printf -- '-u q4dtest\n-P %s\n' "${PW}" > .config/mosquitto_sub
-          # subscribe first, then publish (QoS 1, no retained messages)
-          ( "${B}/client/mosquitto_sub" -h 127.0.0.1 -p 1883 -t q4d/smoke -C 1 -W 5 > sub.out ) &
-          SUBPID=$!
-          sleep 1
-          "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 1883 -t q4d/smoke -m hello -q 1
-          wait "${SUBPID}"
-          grep -q hello sub.out
-          # wrong credentials must be rejected
-          if "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 1883 -u q4dtest -P wrongpw -t q4d/smoke -m x -q 1 2>/dev/null
-          then echo "FAIL: bad password was accepted" && false; fi
-
-          # --- TLS broker with client-cert auth on 127.0.0.1:8883 ---------
-          O="ossl-${{ steps.v.outputs.ossl }}/ossl-install/bin/openssl"
-          "${O}" req -x509 -newkey rsa:4096 -sha256 -days 30 -nodes \
+          # A self-contained PKI: a CA, the server cert (SAN = 127.0.0.1)
+          # and the client cert (its CN is the identity; the broker maps
+          # it to the username with use_identity_as_username). The
+          # runner's own openssl is used - the one built above needs the
+          # musl RUNTIME (/lib/ld-musl-x86_64.so.1), which the runner has
+          # not (only musl-dev), so it cannot be executed there.
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 30 -nodes \
             -keyout ca.key -out ca.crt -subj "/CN=Q4D smoke CA" 2>/dev/null
-          "${O}" req -newkey rsa:2048 -sha256 -nodes \
+          openssl req -newkey rsa:2048 -sha256 -nodes \
             -keyout server.key -out server.csr -subj "/CN=127.0.0.1" 2>/dev/null
-          "${O}" x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
-            -out server.crt -days 30 \
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
+            -CAcreateserial -out server.crt -days 30 \
             -extfile <(printf "subjectAltName=IP:127.0.0.1") 2>/dev/null
-          "${O}" req -newkey rsa:2048 -sha256 -nodes \
+          openssl req -newkey rsa:2048 -sha256 -nodes \
             -keyout client.key -out client.csr -subj "/CN=q4dtest" 2>/dev/null
-          "${O}" x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
-            -out client.crt -days 30 2>/dev/null
-          # require_certificate is the auth gate; the CN becomes the
-          # username. allow_anonymous must be set explicitly: mosquitto
-          # 2.x disallows anonymous when any auth option is set and it is
-          # not (conf.c), and with no password file the connect check
-          # falls through to exactly that flag.
+          openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key \
+            -CAcreateserial -out client.crt -days 30 2>/dev/null
+
+          # require_certificate is the auth gate (only certs signed by
+          # our CA can connect); the CN becomes the username.
+          # allow_anonymous must be set explicitly: mosquitto 2.x errors
+          # on startup when any auth option is set without it.
           cat > tls.conf <<EOF
           listener 8883 127.0.0.1
           cafile $(pwd)/ca.crt
@@ -208,26 +189,36 @@ jobs:
           keyfile $(pwd)/server.key
           require_certificate true
           use_identity_as_username true
-          allow_anonymous true
+          allow_anonymous false
           EOF
-          "${B}/src/mosquitto" -c tls.conf -d
+          "${B}/src/mosquitto" -c tls.conf > broker.log 2>&1 &
+          BROKER=$!
           sleep 1
+          kill -0 "${BROKER}" 2>/dev/null || { echo "broker failed to start"; exit 1; }
+
+          # Client auth from the config file - nothing sensitive on the
+          # command line. NOTE: mosquitto_pub/sub config files hold CLI
+          # option tokens (--cafile/...), not "key value" pairs.
+          mkdir -p .config
           printf -- '--cafile %s\n--cert %s\n--key %s\n' \
             "$(pwd)/ca.crt" "$(pwd)/client.crt" "$(pwd)/client.key" > .config/mosquitto_pub
           printf -- '--cafile %s\n--cert %s\n--key %s\n' \
             "$(pwd)/ca.crt" "$(pwd)/client.crt" "$(pwd)/client.key" > .config/mosquitto_sub
-          ( "${B}/client/mosquitto_sub" -h 127.0.0.1 -p 8883 -t q4d/smoketls -C 1 -W 5 > subtls.out ) &
+          # subscribe first, then publish (QoS 1, no retained messages)
+          ( "${B}/client/mosquitto_sub" -h 127.0.0.1 -p 8883 -t q4d/smoke -C 1 -W 5 > sub.out ) &
           SUBPID=$!
           sleep 1
-          "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 8883 -t q4d/smoketls -m secure -q 1
+          "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 8883 -t q4d/smoke -m hello -q 1
           wait "${SUBPID}"
-          grep -q secure subtls.out
-
+          grep -q hello sub.out
           # a client without a certificate must be rejected (TLS layer)
           # (HOME and XDG_CONFIG_HOME both pointed away from the cert config)
           if HOME=/tmp/nonexistent-home XDG_CONFIG_HOME=/tmp/nonexistent-home/.config \
               "${B}/client/mosquitto_pub" -h 127.0.0.1 -p 8883 -t q4d/x -m y -q 1 2>/dev/null
           then echo "FAIL: no-cert client was accepted" && false; fi
+
+          kill "${BROKER}" 2>/dev/null || true
+          echo "smoke test passed: TLS client-cert auth (pub/sub + no-cert rejection)"
 
       - name: Package tarball
         run: |
@@ -266,7 +257,8 @@ jobs:
             Runs on any distro - no package dependencies.
 
             - mosquitto (broker), mosquitto_pub, mosquitto_sub, mosquitto_rr, mosquitto_passwd
-            - username/password and TLS client-cert auth verified by smoke test
+            - TLS client-cert auth (require_certificate) verified by smoke test,
+              including rejection of clients without a certificate
 
             Used by Q4Dv2 install-broker.sh when the seedbox has no mosquitto
             and no sudo.

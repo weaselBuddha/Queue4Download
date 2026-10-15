@@ -58,11 +58,11 @@ function log()
 ## bus_auth <args-array> <pub|sub>
 ## Fills <args-array> (passed by name) with the credentials for the
 ## mosquitto <pub|sub> client. When the client's own config file exists
-## (install-broker.sh and 'install.sh client' write it - the username and
-## password, or the TLS certificate paths), the client reads the credentials
-## from there itself and nothing sensitive goes on the command line; the
-## array stays empty. Otherwise the array is filled with -u/-P from
-## Q4Dconfig.sh (both empty = no auth).
+## (install-broker.sh and 'install.sh client' write it - the TLS
+## certificate paths), the client reads the credential from there itself
+## and nothing sensitive goes on the command line; the array stays empty.
+## Otherwise the array is filled with legacy -u/-P from Q4Dconfig.sh
+## (both empty = no auth).
 function bus_auth()
 {
     local -n _args=$1

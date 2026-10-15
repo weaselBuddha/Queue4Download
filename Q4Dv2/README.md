@@ -172,22 +172,19 @@ binary when mosquitto is not already there:
                                tarball (the broker itself is left alone),
                                manual steps printed for /etc/mosquitto
 
-Auth (chosen at install; the client config files it writes are what keep
-the credentials off every command line - see bus_auth in Q4Dlib.sh):
-
-- `username` (default) - mosquitto_passwd hash file, `-u`/`-P` in the
-  client config files
-- `tls` - self-generated CA + server + client certs under
-  `~/.Q4D/mosquitto/tls`, `require_certificate true` (the cert IS the
-  credential); the home server pulls its client cert in `install.sh client`
-- `none` - refused by default; a warning is printed (an unauthenticated
-  broker that is not behind a NAT is open to anyone who can reach it)
+Auth is TLS client certificates (the cert IS the credential - there is no
+password). install-broker.sh generates a self-contained PKI (CA + server +
+client certs) under `~/.Q4D/mosquitto/tls` and configures the broker with
+`require_certificate true` (the cert's CN becomes the username); the client
+config files it writes keep the cert paths off every command line (see
+bus_auth in Q4Dlib.sh). The home server pulls its client cert in
+`install.sh client`.
 
 The static tarball is built by the GitHub workflow
 `.github/workflows/mosquitto-static.yml` (musl libc + static OpenSSL,
-fully-static verified, smoke-tested with both auth modes) and published as
-the `mosquitto-static-<version>` GitHub release; install-broker.sh pins the
-release (override with `MOSQUITTO_STATIC_URL` or `--tarball=PATH`).
+fully-static verified, smoke-tested with TLS client-cert auth) and published
+as the `mosquitto-static-<version>` GitHub release; install-broker.sh pins
+the release (override with `MOSQUITTO_STATIC_URL` or `--tarball=PATH`).
 
 ## Quick start
 

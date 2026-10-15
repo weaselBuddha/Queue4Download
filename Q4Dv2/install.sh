@@ -556,14 +556,14 @@ function install_server()
     #    address) and the log mode.
     if [[ ${_rc} -eq 0 ]]
     then
+        # Auth is TLS client certs (install-broker.sh): the credential is
+        # the cert, not a password - BUS_USER/BUS_PW are left empty.
         _bhost=$(broker_conf HOST); _bhost=${_bhost:-$(net_address)}
-        _bport=$(broker_conf PORT); _bport=${_bport:-1883}
-        _buser=$(broker_conf USER); _buser=${_buser:-mosquitto_user}
-        _bpw=$(broker_conf PW);     _bpw=${_bpw:-mqtt_password}
+        _bport=$(broker_conf PORT); _bport=${_bport:-8883}
         set_config "${_dest}/Q4Dconfig.sh" BUS_HOST "$(prompt "broker host (seedbox address the home server uses)" "${_bhost}")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_PORT "$(prompt "broker port" "${_bport}")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_USER "$(prompt "MQTT username" "${_buser}")"
-        set_config "${_dest}/Q4Dconfig.sh" BUS_PW "$(prompt "MQTT password" "${_bpw}")"
+        set_config "${_dest}/Q4Dconfig.sh" BUS_PORT "$(prompt "broker port (TLS)" "${_bport}")"
+        set_config "${_dest}/Q4Dconfig.sh" BUS_USER ""
+        set_config "${_dest}/Q4Dconfig.sh" BUS_PW ""
         if [[ ! -f "${_dest}/broker.conf" ]]
         then
             msg "note: no ~/.Q4D/broker.conf - run install-broker.sh on this seedbox to set up the broker"
@@ -706,32 +706,30 @@ function copy_client_files()
 }
 
 ## check_broker <dest>
-## Verifies the MQTT broker with the installed credentials (best effort:
-## a failure is reported but never stops the install).
+## Verifies the MQTT broker (best effort: a failure is reported but never
+## stops the install). Auth is TLS client certs: mosquitto_pub reads them
+## from the client config files install-broker.sh wrote (nothing sensitive
+## on the command line).
 function check_broker()
 {
     local _dest=$1
     local _vals=()
     local _bhost
     local _bport
-    local _buser
-    local _bpw
     local _rc=0
 
-    mapfile -t _vals < <(bash -c "source '${_dest}/Q4Dconfig.sh'; printf '%s\n' \"\$BUS_HOST\" \"\$BUS_PORT\" \"\$BUS_USER\" \"\$BUS_PW\"")
+    mapfile -t _vals < <(bash -c "source '${_dest}/Q4Dconfig.sh'; printf '%s\n' \"\$BUS_HOST\" \"\$BUS_PORT\"")
     _bhost="${_vals[0]:-}"
     _bport="${_vals[1]:-}"
-    _buser="${_vals[2]:-}"
-    _bpw="${_vals[3]:-}"
 
     if ! command -v mosquitto_pub >/dev/null
     then
         msg "broker: mosquitto_pub not found - skipping"
-    elif mosquitto_pub -h "${_bhost}" -p "${_bport}" -u "${_buser}" -P "${_bpw}" -t "Q4D/install/check" -m ok -q 1
+    elif mosquitto_pub -h "${_bhost}" -p "${_bport}" -t "Q4D/install/check" -m ok -q 1
     then
-        msg "broker: ok (${_bhost}:${_bport}, auth ok)"
+        msg "broker: ok (${_bhost}:${_bport}, TLS client-cert auth accepted)"
     else
-        msg "broker: FAILED (${_bhost}:${_bport}) - broker down or bad credentials (continuing)"
+        msg "broker: FAILED (${_bhost}:${_bport}) - broker down or client cert missing (continuing)"
         _rc=1
     fi
 

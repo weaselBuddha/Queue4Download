@@ -28,25 +28,27 @@
 #   1. detect an existing mosquitto (nothing is installed when there is one)
 #   2. install the missing broker/tools (package, else static)
 #   3. ask the bind address (default: the network address) and the port
-#   4. credentials: username/password (mosquitto_passwd) or TLS client
-#      certificates (self-generated CA) - generated in the user dir
-#   5. write mosquitto.conf for the chosen mode (the user dir for a static
-#      install; /etc/mosquitto, backed up, with the credentials copied to
+#   4. credentials: TLS client certificates (self-generated CA) - the
+#      cert is the credential (there is no password), generated in the
+#      user dir
+#   5. write mosquitto.conf for the chosen install (the user dir for a
+#      static install; /etc/mosquitto, backed up, with the PKI copied to
 #      /etc/mosquitto/q4d, for a package install)
-#   6. write the mosquitto_pub/sub client config files - the credentials
-#      then live in the file (600), never on a command line
+#   6. write the mosquitto_pub/sub client config files - the credential
+#      (the cert paths) then lives in the file (600), never on a command
+#      line
 #   7. run the daemon: the distro service when root/sudo, a systemd user
 #      unit or cron @reboot+keepalive (flock) when not (best effort)
 #   8. verify: a publish through the broker with the config-file auth
 #      (best effort - a failure warns, it never stops the install)
-#   9. write ~/.Q4D/broker.conf (HOST/PORT/AUTH/USER/PW) - 'install.sh
-#      server' reads these as its broker defaults
+#   9. write ~/.Q4D/broker.conf (HOST/PORT/AUTH) - 'install.sh server'
+#      reads these as its broker defaults
 #
 # Style: same as install.sh - single entrance, single exit, functions take
 # their inputs as arguments, print their value on stdout (when any), return
-# 0/1, status lines (msg) go to stderr. No globals: the broker dir, the
-# bind address and the mode are all passed by name. The entry function
-# states its steps as numbered comments, one action each.
+# 0/1, status lines (msg) go to stderr. No globals: the broker dir and the
+# bind address are passed by name. The entry function states its steps as
+# numbered comments, one action each.
 
 set -u
 
@@ -409,43 +411,6 @@ function path_hint()
 
 ## --- credentials -------------------------------------------------------------------
 
-## gen_password
-## Prints a random 32-hex-digit password (openssl, or /dev/urandom).
-function gen_password()
-{
-    if command -v openssl >/dev/null
-    then
-        openssl rand -hex 16
-    else
-        head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
-    fi
-}
-
-## make_passwd <dir> <user> <password>
-## (Re)creates <dir>/passwd with the one user, via mosquitto_passwd (the
-## file holds the salted hash, never the password).
-function make_passwd()
-{
-    local _dir=$1
-    local _user=$2
-    local _pw=$3
-    local _mpw
-    local _rc=1
-
-    _mpw=$(mosq_bin mosquitto_passwd)
-
-    if [[ -x "${_mpw}" ]]
-    then
-        mkdir -p "${_dir}"
-        "${_mpw}" -c -b "${_dir}/passwd" "${_user}" "${_pw}" </dev/null && \
-        chmod 600 "${_dir}/passwd" && _rc=0
-    else
-        msg "mosquitto_passwd not found - cannot create the password file"
-    fi
-
-    return ${_rc}
-}
-
 ## make_tls <dir> <bind> <cn>
 ## Generates a self-contained PKI in <dir>/tls: a CA, the server cert
 ## (SAN = the bind address + hostname) and the client cert (CN = <cn>).
@@ -462,7 +427,7 @@ function make_tls()
 
     if ! command -v openssl >/dev/null
     then
-        msg "openssl not found - the TLS mode needs it (re-run with the username mode)"
+        msg "openssl not found - the TLS mode needs it"
         return 1
     fi
 
@@ -499,12 +464,13 @@ function make_tls()
 
 ## --- configuration ---------------------------------------------------------------
 
-## write_conf <dir> <conffile> <persist> <logfile> <bind> <port> <mode>
-## Writes the broker config for the chosen auth mode. <dir> holds the
-## credentials (passwd, tls/); <persist>/<logfile> are empty when the
-## distro's defaults apply (package installs). The broker is assumed to be
-## on the seedbox, not behind a NAT: the listener binds the network address
-## so the home server can reach it directly.
+## write_conf <dir> <conffile> <persist> <logfile> <bind> <port>
+## Writes the broker config: TLS client-cert auth (require_certificate;
+## the cert is the credential, the CN becomes the username). <dir> holds
+## the PKI (tls/); <persist>/<logfile> are empty when the distro's defaults
+## apply (package installs). The broker is assumed to be on the seedbox,
+## not behind a NAT: the listener binds the network address so the home
+## server can reach it directly.
 function write_conf()
 {
     local _dir=$1
@@ -513,34 +479,22 @@ function write_conf()
     local _logfile=$4
     local _bind=$5
     local _port=$6
-    local _mode=$7
     local _rc=1
 
     {
         echo "# Q4D mosquitto config - written by install-broker.sh on $(date)"
-        echo "# auth mode: ${_mode}"
-        if [[ "${_mode}" == "tls" ]]
-        then
-            # require_certificate is the auth gate (only certs signed by our
-            # CA can connect); the CN becomes the username. allow_anonymous
-            # must be set explicitly: mosquitto 2.x disallows anonymous when
-            # any auth option is set and it is not, and with no password
-            # file the connect check falls through to exactly that flag.
-            echo "listener ${_port} ${_bind}"
-            echo "cafile ${_dir}/tls/ca.crt"
-            echo "certfile ${_dir}/tls/server.crt"
-            echo "keyfile ${_dir}/tls/server.key"
-            echo "require_certificate true"
-            echo "use_identity_as_username true"
-            echo "allow_anonymous true"
-        else
-            echo "listener ${_port} ${_bind}"
-            if [[ "${_mode}" == "username" ]]
-            then
-                echo "allow_anonymous false"
-                echo "password_file ${_dir}/passwd"
-            fi
-        fi
+        echo "# auth: TLS client certs (require_certificate)"
+        # require_certificate is the auth gate (only certs signed by our
+        # CA can connect); the CN becomes the username. allow_anonymous
+        # must be set explicitly: mosquitto 2.x errors on startup when any
+        # auth option is set without it.
+        echo "listener ${_port} ${_bind}"
+        echo "cafile ${_dir}/tls/ca.crt"
+        echo "certfile ${_dir}/tls/server.crt"
+        echo "keyfile ${_dir}/tls/server.key"
+        echo "require_certificate true"
+        echo "use_identity_as_username true"
+        echo "allow_anonymous false"
         if [[ -n "${_persist}" ]]
         then
             echo "persistence true"
@@ -556,18 +510,15 @@ function write_conf()
     return ${_rc}
 }
 
-## write_client_conf <mode> <user> <password> <clicertdir>
+## write_client_conf <clicertdir>
 ## Writes the mosquitto_pub/sub client config files (600) - the ones
-## Q4Dlib.sh's bus_auth looks for, so the credentials never appear on a
-## command line. NOTE: those files hold CLI option tokens (-u/-P,
-## --cafile/...), not "key value" pairs. The TLS paths point at
+## Q4Dlib.sh's bus_auth looks for, so the credential (the cert paths)
+## never appears on a command line. NOTE: those files hold CLI option
+## tokens (--cafile/...), not "key value" pairs. The paths point at
 ## <clicertdir>/tls (kept user-readable, even in package mode).
 function write_client_conf()
 {
-    local _mode=$1
-    local _user=$2
-    local _pw=$3
-    local _clicertdir=$4
+    local _clicertdir=$1
     local _cfg
     local _f
     local _rc=1
@@ -577,37 +528,26 @@ function write_client_conf()
     mkdir -p "${_cfg}"
     for _f in "${_cfg}/mosquitto_pub" "${_cfg}/mosquitto_sub"
     do
-        if [[ "${_mode}" == "tls" ]]
-        then
-            printf -- '--cafile %s\n--cert %s\n--key %s\n' \
-                "${_clicertdir}/tls/ca.crt" "${_clicertdir}/tls/client.crt" "${_clicertdir}/tls/client.key" > "${_f}"
-        elif [[ "${_mode}" == "username" ]]
-        then
-            printf -- '-u %s\n-P %s\n' "${_user}" "${_pw}" > "${_f}"
-        else
-            : > "${_f}"
-        fi
+        printf -- '--cafile %s\n--cert %s\n--key %s\n' \
+            "${_clicertdir}/tls/ca.crt" "${_clicertdir}/tls/client.crt" "${_clicertdir}/tls/client.key" > "${_f}"
         chmod 600 "${_f}" || break
     done && _rc=0
 
     if [[ ${_rc} -eq 0 ]]
     then
-        msg "client config files: ${_cfg}/mosquitto_pub, ${_cfg}/mosquitto_sub (mode: ${_mode})"
+        msg "client config files: ${_cfg}/mosquitto_pub, ${_cfg}/mosquitto_sub (TLS certs)"
     fi
 
     return ${_rc}
 }
 
-## write_broker_conf <bind> <port> <mode> <user> <password>
+## write_broker_conf <bind> <port>
 ## Writes ~/.Q4D/broker.conf - 'install.sh server' reads these as its
-## broker defaults (broker_conf <key>).
+## broker defaults (broker_conf <key>). Auth is always TLS client certs.
 function write_broker_conf()
 {
     local _bind=$1
     local _port=$2
-    local _mode=$3
-    local _user=$4
-    local _pw=$5
     local _f="${HOME}/.Q4D/broker.conf"
     local _rc=1
 
@@ -615,12 +555,7 @@ function write_broker_conf()
     {
         echo "HOST=${_bind}"
         echo "PORT=${_port}"
-        echo "AUTH=${_mode}"
-        if [[ "${_mode}" == "username" ]]
-        then
-            echo "USER=${_user}"
-            echo "PW=${_pw}"
-        fi
+        echo "AUTH=tls"
     } > "${_f}" && chmod 600 "${_f}" && _rc=0
 
     return ${_rc}
@@ -780,10 +715,10 @@ function pkg_state_dir()
 }
 
 ## pkg_install_creds <srcdir>
-## Copies the credentials generated in <srcdir> (passwd, tls/) into the
-## package state dir and hands them to the mosquitto user. The CLIENT cert
-## stays in <srcdir>/tls (the home server must pull it, and the invoking
-## user must keep reading it).
+## Copies the PKI generated in <srcdir> (tls/) into the package state dir
+## and hands it to the mosquitto user. The CLIENT cert stays in
+## <srcdir>/tls (the home server must pull it, and the invoking user must
+## keep reading it).
 function pkg_install_creds()
 {
     local _src=$1
@@ -797,40 +732,35 @@ function pkg_install_creds()
     if [[ ${EUID} -eq 0 ]]
     then
         mkdir -p "${_dst}"
-        [[ -f "${_src}/passwd" ]] && cp -f "${_src}/passwd" "${_dst}/passwd"
         [[ -d "${_src}/tls" ]] && cp -rf "${_src}/tls" "${_dst}/tls"
         [[ -n "${_muser}" ]] && chown -R "${_muser}:" "${_dst}" 2>/dev/null
         chmod 700 "${_dst}"
-        [[ -f "${_dst}/passwd" ]] && chmod 640 "${_dst}/passwd"
         _rc=0
     elif run_root mkdir -p "${_dst}" \
-        && { [[ -f "${_src}/passwd" ]] && run_root cp -f "${_src}/passwd" "${_dst}/passwd"; } \
         && { [[ -d "${_src}/tls" ]] && run_root cp -rf "${_src}/tls" "${_dst}/tls"; } \
         && { [[ -n "${_muser}" ]] && run_root chown -R "${_muser}:" "${_dst}"; } \
         && run_root chmod 700 "${_dst}"
     then
-        [[ -f "${_dst}/passwd" ]] && run_root chmod 640 "${_dst}/passwd"
         _rc=0
     fi
 
     return ${_rc}
 }
 
-## pkg_write_conf <dir> <bind> <port> <mode>
-## Backs up the distro's mosquitto.conf and writes the Q4D one (the
-## credentials live in the package state dir).
+## pkg_write_conf <dir> <bind> <port>
+## Backs up the distro's mosquitto.conf and writes the Q4D one (the PKI
+## lives in the package state dir).
 function pkg_write_conf()
 {
     local _dir=$1
     local _bind=$2
     local _port=$3
-    local _mode=$4
     local _conf="/etc/mosquitto/mosquitto.conf"
     local _tmpconf
     local _rc=1
 
     _tmpconf=$(mktemp)
-    if write_conf "${_dir}" "${_tmpconf}" "" "" "${_bind}" "${_port}" "${_mode}"
+    if write_conf "${_dir}" "${_tmpconf}" "" "" "${_bind}" "${_port}"
     then
         if [[ ${EUID} -eq 0 ]]
         then
@@ -859,9 +789,7 @@ function install_broker()
     local _pdir=""
     local _bind=""
     local _port=""
-    local _mode=""
     local _user=""
-    local _pw=""
     local _existing=0
     local _static=0
     local _daemonhow=""
@@ -957,51 +885,31 @@ function install_broker()
         _bind=$(prompt "broker bind address (the seedbox address the home server uses; 0.0.0.0 = all)" "$(net_address)")
     fi
 
-    # 4. Credentials (username/password, TLS client certs, or none).
+    # 4. Credentials: TLS client certificates (self-generated CA) - the
+    #    cert is the credential, there is no username/password.
     if [[ ${_rc} -eq 0 ]]
     then
-        _mode=$(prompt "auth mode (username | tls | none)" "username")
-        case "${_mode}" in
-            tls)
-                _port=$(prompt "broker port (TLS)" "8883")
-                _user=$(prompt "certificate common name (client identity)" "mosquitto_user")
-                make_tls "${_dir}" "${_bind}" "${_user}" || _rc=1
-                ;;
-            none)
-                _port=$(prompt "broker port" "1883")
-                msg "WARNING: no auth on a broker that is not behind a NAT - anyone who can reach ${_bind}:${_port} can publish/subscribe"
-                ;;
-            *)
-                _mode=username
-                _port=$(prompt "broker port" "1883")
-                _user=$(prompt "MQTT username" "mosquitto_user")
-                _pw=$(prompt "MQTT password (empty = generate)" "")
-                if [[ -z "${_pw}" ]]
-                then
-                    _pw=$(gen_password)
-                    msg "generated password: ${_pw}"
-                fi
-                make_passwd "${_dir}" "${_user}" "${_pw}" || _rc=1
-                ;;
-        esac
+        _port=$(prompt "broker port (TLS)" "8883")
+        _user=$(prompt "certificate common name (client identity)" "mosquitto_user")
+        make_tls "${_dir}" "${_bind}" "${_user}" || _rc=1
     fi
 
-    # 5. The broker config for the chosen mode.
+    # 5. The broker config (TLS client-cert auth).
     if [[ ${_rc} -eq 0 && ${_static} -eq 1 ]]
     then
         mkdir -p "${_dir}/persist"
         write_conf "${_dir}" "${_dir}/mosquitto.conf" "${_dir}/persist" "${_dir}/broker.log" \
-            "${_bind}" "${_port}" "${_mode}" || _rc=1
+            "${_bind}" "${_port}" || _rc=1
     fi
     if [[ ${_rc} -eq 0 && ${_static} -eq 0 ]] && have_sudo
     then
-        # A package broker (fresh or pre-existing): credentials to
+        # A package broker (fresh or pre-existing): PKI to
         # /etc/mosquitto/q4d, config to /etc/mosquitto (backed up).
         _pdir=$(pkg_state_dir)
         pkg_install_creds "${_dir}" || _rc=1
         if [[ ${_rc} -eq 0 ]]
         then
-            pkg_write_conf "${_pdir}" "${_bind}" "${_port}" "${_mode}" || _rc=1
+            pkg_write_conf "${_pdir}" "${_bind}" "${_port}" || _rc=1
         fi
     fi
     if [[ ${_rc} -eq 0 && ${_static} -eq 0 ]] && ! have_sudo
@@ -1011,10 +919,10 @@ function install_broker()
         msg "no sudo - the existing package broker cannot be reconfigured here (steps 5/7 skipped)"
     fi
 
-    # 6. The client config files (credentials off the command line).
+    # 6. The client config files (the credential off the command line).
     if [[ ${_rc} -eq 0 ]]
     then
-        write_client_conf "${_mode}" "${_user}" "${_pw}" "${_dir}" || _rc=1
+        write_client_conf "${_dir}" || _rc=1
     fi
 
     # 7. Run the daemon (best effort - a failure prints manual steps).
@@ -1046,13 +954,13 @@ function install_broker()
     if [[ ${_rc} -eq 0 ]]
     then
         verify_broker "${_bind}" "${_port}" 3
-        write_broker_conf "${_bind}" "${_port}" "${_mode}" "${_user}" "${_pw}" || _rc=1
+        write_broker_conf "${_bind}" "${_port}" || _rc=1
     fi
 
     if [[ ${_rc} -eq 0 ]]
     then
         echo
-        echo "Broker installed: ${_bind}:${_port} (auth: ${_mode})"
+        echo "Broker installed: ${_bind}:${_port} (auth: TLS client certs)"
         echo
         echo "Next, on this seedbox, run:"
         echo "  install.sh server"

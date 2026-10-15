@@ -14,9 +14,12 @@ readonly Q4D_PATH=~/.Q4D/
 readonly BUS_HOST="your.mosquitto.ip_addr"
 readonly BUS_PORT=1883
 
-# Mosquitto Credentials - Please Change
-readonly BUS_USER="mosquitto_user"
-readonly BUS_PW="mqtt_password"
+## Mosquitto credentials - the TLS client-cert design keeps the credential
+## in the mosquitto_pub/sub config files (install-broker.sh / 'install.sh
+## client' write them; bus_auth picks them up). These stay empty; the
+## -u/-P fallback in bus_auth is only for legacy setups.
+readonly BUS_USER=""
+readonly BUS_PW=""
 
 # Torrent client in use - set by 'install.sh server' to match TorrentTool.sh
 # One of: rtcontrol, rtorrent, deluge, qbit, aria2, other, transmission
