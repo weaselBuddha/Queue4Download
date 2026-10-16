@@ -112,11 +112,13 @@ jobs:
           tar xzf mosq.tar.gz
           # WITH_STATIC_LIBRARIES is what makes the executables link the
           # static libmosquitto (without it they would dlopen the .so).
+          # -static: fully static; -lc: musl needs an explicit libc when
+          # statically linked (harmless where the gcc specs add it).
+          # NOTE: no '#' comments between backslash continuations - a '#'
+          # mid-continuation would comment out every flag after it.
           cmake -S "mosquitto-${VERNO}" -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=musl-gcc \
-            # -static: fully static; -lc: musl needs an explicit libc when
-            # statically linked (harmless where the gcc specs add it)
             -DCMAKE_EXE_LINKER_FLAGS="-static -lc" \
             -DOPENSSL_ROOT_DIR="$PWD/openssl-${{ steps.v.outputs.ossl }}/ossl-install" \
             -DWITH_TLS=ON \
