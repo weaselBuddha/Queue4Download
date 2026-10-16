@@ -25,8 +25,8 @@ readonly ACTIVE_TORRENT_FOLDER=~/.session
 # /home/user/.Q4D/Queue4Download.sh [NAME] [HASH] [LABEL] [TRACKER] [PATH]
 
 # [RTCONTROL] RTorrent - Single Key Rtorrent with pyroscope tool (rtcontrol)
-# /home/user/.Q4D/Queue4Download.sh [NAME]
-# Single Field: .rtorrent.rc >  method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.name)"
+# /home/user/.Q4D/Queue4Download.sh [HASH]
+# Single Field: .rtorrent.rc >  method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.hash)"
 
 # [RTORRENT] RTorrent without additional tool
 # Four Fields: method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.name),(d.hash),(d.custom1),(d.data_path)"

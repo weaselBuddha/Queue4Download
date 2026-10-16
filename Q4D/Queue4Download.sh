@@ -14,7 +14,6 @@ case $TORRENT_CLIENT in
         payloadDetails[KEY]="$1"
         payloadDetails[HASH]=$2
         payloadDetails[LABEL]=$3
-        _rtcFile="$(echo $1|tr  [\]\[\,\'\"] [????])"
         payloadDetails[TRACKER]=$(strings $ACTIVE_TORRENT_FOLDER/$2.torrent |grep "d8:announce" |cut -d: -f4)
         payloadDetails[PATH]="$4"
         ;;
@@ -28,12 +27,17 @@ case $TORRENT_CLIENT in
         ;;
 
     "RTCONTROL")
-        payloadDetails[KEY]="$1"
-        _rtcFile="$(echo "$1"|tr  [\]\[\,\'\"] [????])"
-        payloadDetails[HASH]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "hash")
-        payloadDetails[LABEL]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "custom_1")
-        payloadDetails[TRACKER]=$(${_RTCONTROL} -q name="${_rtcFile}" -o "tracker")
-        payloadDetails[PATH]="$(${_RTCONTROL} -q name="${_rtcFile}" -o path)"
+        # $1 is the torrent info hash (the hook passes (d.hash)): every
+        # rtcontrol query is keyed on the hash - exact match, no name
+        # sanitisation, and safe inside the hook string (a name could
+        # carry quotes/brackets). One query per field (rtcontrol's
+        # multi-field output is space-joined, which mis-parses when a
+        # field is empty - keep one value per call).
+        payloadDetails[HASH]="$1"
+        payloadDetails[KEY]="$(${_RTCONTROL} -q "hash=$1" -o "name")"
+        payloadDetails[LABEL]="$(${_RTCONTROL} -q "hash=$1" -o "custom_1")"
+        payloadDetails[TRACKER]="$(${_RTCONTROL} -q "hash=$1" -o "tracker")"
+        payloadDetails[PATH]="$(${_RTCONTROL} -q "hash=$1" -o "path")"
         ;;
 
     "ARIA2")
