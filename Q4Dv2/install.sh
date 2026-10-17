@@ -14,7 +14,9 @@
 # server steps:
 #   1. select the torrent tool (prompted; --client=NAME overrides the prompt)
 #   2. lay out common/ + server/ flat into ~/.Q4D/
-#   3. verify the tool defines GetPayloadDetails + SetLabel
+#   3. verify the tool defines GetPayloadDetails + SetLabel; for
+#      rtcontrol, ensure the rtcontrol binary itself is present (install
+#      it when missing - python3 -> pyrosimple, python2 -> pyrocore)
 #   4. ask about labelling (warn when the tool cannot set labels)
 #   5. ask broker coordinates (defaults from ~/.Q4D/broker.conf when
 #      present, else the network address)
@@ -484,6 +486,81 @@ function check_tool()
     bash -c "source '${_dest}/Q4Dconfig.sh'; source '${_dest}/TorrentTool.sh'; declare -F GetPayloadDetails SetLabel >/dev/null"
 }
 
+## ensure_rtcontrol
+## True when rtcontrol is on the PATH. When it is not, install it with
+## the python that is present (pip --user, no root needed):
+##   python3 -> pyrosimple (the Python 3 pyrocore fork,
+##              https://github.com/kannibalox/pyrosimple, via PyPI)
+##   python2 -> pyrocore   (the original Python 2 tools,
+##              https://github.com/pyroscope/pyrocore, via PyPI)
+## pip --user puts rtcontrol in ~/.local/bin, which is not always on the
+## PATH (rtorrent's hook inherits rtorrent's environment) - when it is
+## not, also link ~/bin/rtcontrol, the location TorrentTool.rtcontrol
+## falls back to.
+function ensure_rtcontrol()
+{
+    local _py=""
+    local _pkg=""
+
+    if command -v rtcontrol >/dev/null
+    then
+        msg "rtcontrol: $(command -v rtcontrol)"
+        return 0
+    fi
+
+    if command -v python3 >/dev/null && python3 -m pip --version >/dev/null 2>&1
+    then
+        _py=python3
+        _pkg=pyrosimple
+    elif command -v python2 >/dev/null && python2 -m pip --version >/dev/null 2>&1
+    then
+        _py=python2
+        _pkg=pyrocore
+    elif command -v python >/dev/null && python -m pip --version >/dev/null 2>&1
+    then
+        # a bare 'python' (2.x or 3.x) - take whichever it is
+        if python -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null
+        then
+            _pkg=pyrosimple
+        else
+            _pkg=pyrocore
+        fi
+        _py=python
+    fi
+
+    if [[ -z "${_py}" ]]
+    then
+        msg "rtcontrol: not found, and no python2/python3 with pip to install it"
+        msg "       (install python + pip, or place rtcontrol on the PATH by hand)"
+        return 1
+    fi
+
+    msg "rtcontrol: not found - installing ${_pkg} (via ${_py} -m pip --user)"
+    # --user: no root needed. The retry covers PEP 668 'externally
+    # managed' environments, which refuse system-wide installs.
+    if ! "${_py}" -m pip install --user "${_pkg}" >/dev/null 2>&1
+    then
+        if ! "${_py}" -m pip install --user --break-system-packages "${_pkg}" >/dev/null 2>&1
+        then
+            msg "rtcontrol: the ${_pkg} install failed - install it by hand and re-run"
+            return 1
+        fi
+    fi
+
+    if ! command -v rtcontrol >/dev/null
+    then
+        mkdir -p "${HOME}/bin" && ln -sf "${HOME}/.local/bin/rtcontrol" "${HOME}/bin/rtcontrol"
+    fi
+    if command -v rtcontrol >/dev/null || [[ -x "${HOME}/bin/rtcontrol" ]]
+    then
+        msg "rtcontrol: installed (${_pkg})"
+        return 0
+    fi
+
+    msg "rtcontrol: installed but not found - check your PATH"
+    return 1
+}
+
 ## install_server <repo> [--client=NAME]
 ## Lays out the seedbox.
 function install_server()
@@ -528,7 +605,8 @@ function install_server()
         msg "files laid out in ${_dest} (tool: ${_client})"
     fi
 
-    # 3. The selected tool must define both contract functions.
+    # 3. The selected tool must define both contract functions; rtcontrol
+    #    additionally needs the rtcontrol binary (installed when missing).
     if [[ ${_rc} -eq 0 ]]
     then
         if check_tool "${_dest}" "${_client}"
@@ -538,6 +616,10 @@ function install_server()
             msg "TorrentTool.${_client} does not define GetPayloadDetails + SetLabel"
             _rc=1
         fi
+    fi
+    if [[ ${_rc} -eq 0 && "${_client}" == "rtcontrol" ]]
+    then
+        ensure_rtcontrol || _rc=1
     fi
 
     # 4. Ask about labelling (warn when the tool cannot set labels).

@@ -7,7 +7,10 @@
 #   (fills the payload record via payload_set: KEY HASH LABEL TRACKER PATH)
 # Labelling: rtcontrol custom_1  (pyroscope: https://github.com/kannibalox/pyrosimple)
 
-readonly _RTCONTROL=~/bin/rtcontrol
+## rtcontrol from the PATH (a pip --user install, e.g. from install.sh's
+## ensure_rtcontrol), else the traditional ~/bin/rtcontrol location.
+_RTCONTROL=$(command -v rtcontrol 2>/dev/null) || _RTCONTROL=${HOME}/bin/rtcontrol
+readonly _RTCONTROL
 
 function GetPayloadDetails()
 {
