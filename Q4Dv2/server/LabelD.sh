@@ -12,7 +12,9 @@
 # The daemon is tolerant: a missing tool, a broker blip or a failed
 # SetLabel all log and retry, so a single bad event cannot kill it.
 # mosquitto_sub reconnects on its own; the loop only restarts hard
-# exits (bad credentials, missing binary).
+# exits (bad credentials, missing binary). A one-shot BrokerLinkCheck
+# gates the loop: when the broker cannot be reached at startup the
+# daemon exits 1 and the service (or the cron keepalive) restarts it.
 #
 # shellcheck disable=SC1090,SC1091  # source paths resolve only at runtime
 
@@ -72,6 +74,18 @@ function Main()
         log FAIL "Label Daemon Bailing"
     else
         log INFO "Label Daemon Started"
+
+        # One-shot verification that comms with the broker are
+        # established before the loop (no heartbeat: each GetEvent is a
+        # fresh connection). When the check fails, exit 1 - the unit's
+        # Restart=on-failure (or the cron keepalive) retries while the
+        # broker comes up.
+        if ! BrokerLinkCheck 3
+        then
+            log FAIL "broker link not established (${BUS_HOST}:${BUS_PORT}) - check the broker and the client cert config (${XDG_CONFIG_HOME:-${HOME}/.config}/mosquitto_pub); exiting for a restart"
+            return 1
+        fi
+        log INFO "broker link established (${BUS_HOST}:${BUS_PORT})"
 
         while true
         do

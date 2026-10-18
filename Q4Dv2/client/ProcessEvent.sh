@@ -55,19 +55,20 @@ function check_binaries()
 }
 
 ## check_broker
-## True when a probe publish reaches the broker.
+## True when a probe publish reaches the broker (config-file auth - the
+## cert, nothing sensitive on the command line).
 function check_broker()
 {
     local _rc=1
 
-    if "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -u "${BUS_USER}" -P "${BUS_PW}" -t "Q4D/check" -m ok -q 1
+    if BrokerLinkCheck 3
     then
         _rc=0
     fi
 
     if [[ ${_rc} -ne 0 ]]
     then
-        log ERROR "broker not reachable at ${BUS_HOST}:${BUS_PORT}"
+        log ERROR "broker not reachable at ${BUS_HOST}:${BUS_PORT} (check the broker and the client config in ${XDG_CONFIG_HOME:-${HOME}/.config}/mosquitto_pub)"
     fi
 
     return ${_rc}

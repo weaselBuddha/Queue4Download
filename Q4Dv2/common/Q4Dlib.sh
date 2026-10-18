@@ -123,6 +123,39 @@ function GetEvent()
     "${SUBSCRIBER}" -h "${BUS_HOST}" -p "${BUS_PORT}" -t "$1" -C 1 "${_auth[@]}"
 }
 
+## BrokerLinkCheck <tries>
+## One-shot verification that comms with the broker are established: a
+## QoS-1 publish on a private channel must get through (the broker's
+## CONNACK + PUBACK is the proof - the subscriber path is the same
+## session). Auth is the client config file (mosquitto_pub reads it
+## itself; bus_auth adds the legacy -u/-P when there is no config file).
+## Returns 0 when an attempt gets through, 1 when all fail. The 10s cap
+## keeps an unreachable broker from hanging the caller.
+function BrokerLinkCheck()
+{
+    local _tries=${1:-3}
+    local _auth=()
+    local _i
+    local _rc=1
+
+    bus_auth _auth pub
+    for _i in $(seq 1 "${_tries}")
+    do
+        if timeout 10 "${PUBLISHER}" -h "${BUS_HOST}" -p "${BUS_PORT}" \
+            -t "Q4D/link/check" -m ping -q 1 </dev/null 2>/dev/null "${_auth[@]}"
+        then
+            _rc=0
+            break
+        fi
+        if [[ ${_i} -lt ${_tries} ]]
+        then
+            sleep 2
+        fi
+    done
+
+    return ${_rc}
+}
+
 ## WaitLock <lockfile>
 ## Blocks until <lockfile> is free, then holds it for the life of the
 ## process. Pass a distinct lockfile per lock:
