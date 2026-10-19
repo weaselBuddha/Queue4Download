@@ -38,7 +38,7 @@
 #      (the cert paths) then lives in the file (600), never on a command
 #      line
 #   7. run the daemon: the distro service when root/sudo, a systemd user
-#      unit or cron @reboot+keepalive (flock) when not (best effort)
+#      unit or cron @reboot (flock) when not (best effort)
 #   8. verify: a publish through the broker with the config-file auth
 #      (best effort - a failure warns, it never stops the install)
 #   9. write ~/.Q4D/broker.conf (HOST/PORT/AUTH) - 'install.sh server'
@@ -601,8 +601,12 @@ EOF
 }
 
 ## daemon_cron <dir>
-## Runs the static broker via cron: an @reboot start plus a per-minute
-## keepalive, guarded by flock (a double start is then harmless).
+## Runs the static broker via cron: an @reboot start, guarded by flock
+## (a double start is then harmless - e.g. a manual start before @reboot
+## fires, or a leftover instance). There is no keepalive: the broker is
+## expected to stay up for the life of the box; if it dies at runtime it
+## stays down until the next reboot (on a systemd box, the user unit's
+## Restart=on-failure covers this instead).
 function daemon_cron()
 {
     local _dir=$1
@@ -614,7 +618,7 @@ function daemon_cron()
     _flock=$(command -v flock 2>/dev/null)
     if [[ -z "${_flock}" ]]
     then
-        msg "flock not found - cannot set up the cron keepalive"
+        msg "flock not found - cannot set up the cron start"
         return 1
     fi
 
@@ -624,7 +628,6 @@ function daemon_cron()
     {
         [[ -n "${_crontab}" ]] && printf '%s\n' "${_crontab}"
         echo "@reboot ${_cmd} # Q4D mosquitto"
-        echo "* * * * * ${_cmd} || true # Q4D mosquitto"
     } | crontab - && _rc=0
 
     return ${_rc}

@@ -165,8 +165,8 @@ binary when mosquitto is not already there:
 - broker absent + sudo      -> distro package, configured in /etc/mosquitto
                                (original config backed up)
 - broker absent, no sudo    -> static tarball into ~/.Q4D/mosquitto, daemon
-                               via a systemd user unit or cron (flock
-                               keepalive)
+                               via a systemd user unit or cron @reboot
+                               (flock)
 - broker present + sudo     -> reconfigured in /etc/mosquitto, restarted
 - broker present, no sudo   -> missing client tools taken from the static
                                tarball (the broker itself is left alone),
