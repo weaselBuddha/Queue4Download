@@ -41,12 +41,24 @@ directly, so the listener binds the seedbox's network address, never
 | Need | Why |
 |---|---|
 | git | repo checkout |
-| a torrent client, rTorrent by default (with pyrosocket) | the `rtcontrol` tool talks to it |
+| the torrent client you run (one of the adapters below) | each `install.sh server --client=<tool>` adapter talks to one of these |
 | mosquitto OR nothing | with sudo the distro package is used; without it, the static tarball from the `mosquitto-static-2.0.22` GitHub release (the seedbox must be able to reach github.com) |
 | openssl | generates the broker PKI (CA + server + client certs) |
-| python 3 (or 2) + pip, only if rtcontrol is not already installed | the installer then runs `pip --user install pyrosimple` (py3) or `pyrocore` (py2) |
+| python 3 (or 2) + pip, when needed by the tool | `rtcontrol` selected but missing: the installer runs `pip --user install pyrosimple` (py3) or `pyrocore` (py2); deluge/qbit labelling: `pip install deluge-client` / `qbittorrent-api` |
 | systemd (preferred) or cron + flock | runs the broker (no-systemd path: cron `@reboot` only — no keepalive) and the daemons |
 | network | home server must reach the broker port (8883) and SFTP (22) |
+
+**Torrent client adapters** (the `--client=` choice in
+`install.sh server`, one per `TorrentTool.*` file):
+
+| Tool | Client | Extra needs | Labelling |
+|---|---|---|---|
+| `rtcontrol` (default) | rTorrent with pyrosocket | `rtcontrol` on the PATH (installed by the installer when missing) | `rtcontrol --custom 1=<label>` |
+| `rtorrent` | rTorrent, bare (no pyroscope) | none | none available |
+| `deluge` | Deluge local daemon + Execute plugin | `pip install deluge-client` (labelling) | `labellers/delugeLabeller.py` |
+| `qbit` | qBittorrent | `pip install qbittorrent-api` (labelling) | `labellers/qbitLabeller.py` |
+| `transmission` | Transmission daemon (*untested*) | none | none by default |
+| `other` | anything you wire up yourself | the hook must supply all five details | none by default |
 
 **Home server**
 
@@ -143,15 +155,51 @@ Run on the seedbox, **after the broker is installed**:
    install finds the files on the seedbox through it.
 
 It ends with `Server installed: ~/.Q4D (torrent tool: <tool>)` and
-**prints the tool's header — including the hook line**. The last manual
-step of the whole installation: add that line to the torrent client's
-config (for rTorrent, `.rtorrent.rc`):
+**prints the tool's header — including that tool's hook line**. The
+last manual step of the whole installation is that hook: add it to the
+torrent client's config (the installer prints the one you selected;
+each is also in the header of `~/.Q4D/TorrentTool.sh`).
+
+**`rtcontrol`** (rTorrent + pyrosocket) — in `.rtorrent.rc`:
 
     method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.hash)"
 
 The single argument is the torrent info **hash** (exact match, safe in
-the hook string); the tool resolves name/label/tracker/path from it.
-Restart the torrent client so the hook takes effect.
+the hook string); the tool resolves name/label/tracker/path from it
+via rtcontrol.
+
+**`rtorrent`** (bare, no pyroscope) — in `.rtorrent.rc`, four
+arguments (name, hash, label, path):
+
+    method.set_key = event.download.finished,complete,"execute.throw.bg=~/.Q4D/Queue4Download.sh,(d.name),(d.hash),(d.custom1),(d.data_path)"
+
+No labelling is available with bare rTorrent (use `rtcontrol` if you
+have pyroscope).
+
+**`deluge`** — the Execute plugin (it provides the three parameters —
+hash, name, path — by default):
+
+    ~/.Q4D/Queue4Download.sh "%H" "%N" "%P"
+
+**`qbit`** (qBittorrent: Downloads → "Run external program on torrent
+completion"), five arguments (name, hash, label, tracker, path):
+
+    ~/.Q4D/Queue4Download.sh "%N" %I %L %T "%F"
+
+**`transmission`** (daemon; *untested*) — in
+`transmission-daemon/settings.json`; the hook passes **no arguments**,
+the details arrive as `TR_*` environment variables:
+
+    "script-torrent-done-enabled": true,
+    "script-torrent-done-filename": "/home/YOU/.Q4D/Queue4Download.sh"
+
+**`other`** (any client you wire up yourself) — the hook must supply
+all five details:
+
+    ~/.Q4D/Queue4Download.sh [NAME] [HASH] [LABEL] [TRACKER] [PATH]
+
+Restart/reload the torrent client after adding the hook so it takes
+effect.
 
 ## 4. Client (home server) — `install.sh client`
 
@@ -259,7 +307,7 @@ or the distro journal (package).
 | Symptom | Look at |
 |---|---|
 | `broker link not established` (daemon log, then exits) | broker running? port/firewall? the cert config it names (`~/.config/mosquitto_pub` / `_sub`) — all three files (`ca.crt`, `client.crt`, `client.key`) must exist and be readable |
-| No events at all | the hook: is the `.rtorrent.rc` line present and using `(d.hash)`? (it is printed by `install.sh server` — also in the header of `~/.Q4D/TorrentTool.sh`) |
+| No events at all | the hook: is the line for **your tool** present (printed by `install.sh server` — also in the header of `~/.Q4D/TorrentTool.sh`)? for rTorrent it must use `(d.hash)` (rtcontrol) or the four `(d.name),(d.hash),(d.custom1),(d.data_path)` args (bare) |
 | `rtcontrol` missing / tool contract fails | python + pip present? re-run `install.sh server` — it reinstalls the tool binary |
 | Client can't SFTP | `ssh -i ~/.ssh/id_ed25519_q4d you@seedbox` — key installed? `~/.Q4D/.q4d-repo` on the seedbox? |
 | Broker died and nothing restarted (no systemd) | by design: the cron path is `@reboot` only — start it with `~/.Q4D/mosquitto/bin/mosquitto -c ~/.Q4D/mosquitto/mosquitto.conf` |
